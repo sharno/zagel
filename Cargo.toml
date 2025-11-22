@@ -1,0 +1,13 @@
+[package]
+name = "zagel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.89"
+iced = { version = "0.12.1", features = ["tokio", "image"] }
+reqwest = { version = "0.12.8", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.132"
+time = { version = "0.3.36", features = ["macros"] }
+walkdir = "2.5.0"
