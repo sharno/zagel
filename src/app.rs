@@ -92,11 +92,11 @@ impl Zagel {
         (app, task)
     }
 
-    fn subscription(&self) -> Subscription<Message> {
+    fn subscription(_state: &Self) -> Subscription<Message> {
         time::every(FILE_SCAN_COOLDOWN).map(|_| Message::Tick)
     }
 
-    fn theme(&self) -> Theme {
+    const fn theme(_: &Self) -> Theme {
         Theme::Nord
     }
 

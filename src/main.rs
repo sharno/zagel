@@ -1,3 +1,5 @@
+#![allow(clippy::multiple_crate_versions)]
+
 mod app;
 mod model;
 mod net;
