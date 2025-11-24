@@ -19,7 +19,7 @@ cargo = "warn"
 
 [dependencies]
 anyhow = "1.0.89"
-iced = { version = "0.12.1", features = ["tokio", "image"] }
+iced = { version = "0.13.1", features = ["tokio", "image"] }
 reqwest = { version = "0.12.8", default-features = false, features = [
     "json",
     "gzip",
