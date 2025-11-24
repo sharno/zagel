@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use reqwest::Client;
 
-use crate::model::{apply_environment, Environment, RequestDraft, ResponsePreview};
+use crate::model::{Environment, RequestDraft, ResponsePreview, apply_environment};
 
 pub async fn send_request(
     client: Client,
@@ -27,7 +27,11 @@ pub async fn send_request(
     }
 
     let start = Instant::now();
-    let response = req.body(body_text).send().await.map_err(|e| e.to_string())?;
+    let response = req
+        .body(body_text)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let status = response.status().as_u16();
     let text = response
         .text()

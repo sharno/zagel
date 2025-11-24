@@ -15,23 +15,23 @@ pub enum Method {
 }
 
 impl Method {
-    pub const ALL: [Method; 6] = [
-        Method::Get,
-        Method::Post,
-        Method::Put,
-        Method::Delete,
-        Method::Patch,
-        Method::Head,
+    pub const ALL: [Self; 6] = [
+        Self::Get,
+        Self::Post,
+        Self::Put,
+        Self::Delete,
+        Self::Patch,
+        Self::Head,
     ];
 
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Method::Get => "GET",
-            Method::Post => "POST",
-            Method::Put => "PUT",
-            Method::Delete => "DELETE",
-            Method::Patch => "PATCH",
-            Method::Head => "HEAD",
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Patch => "PATCH",
+            Self::Head => "HEAD",
         }
     }
 }
@@ -45,12 +45,12 @@ impl std::fmt::Display for Method {
 impl From<&str> for Method {
     fn from(value: &str) -> Self {
         match value.to_uppercase().as_str() {
-            "POST" => Method::Post,
-            "PUT" => Method::Put,
-            "DELETE" => Method::Delete,
-            "PATCH" => Method::Patch,
-            "HEAD" => Method::Head,
-            _ => Method::Get,
+            "POST" => Self::Post,
+            "PUT" => Self::Put,
+            "DELETE" => Self::Delete,
+            "PATCH" => Self::Patch,
+            "HEAD" => Self::Head,
+            _ => Self::Get,
         }
     }
 }
@@ -116,7 +116,7 @@ pub struct ResponsePreview {
 }
 
 impl ResponsePreview {
-    pub fn error(message: String) -> Self {
+    pub const fn error(message: String) -> Self {
         Self {
             status: None,
             duration: None,
@@ -129,7 +129,7 @@ impl ResponsePreview {
 pub fn apply_environment(input: &str, vars: &BTreeMap<String, String>) -> String {
     let mut out = input.to_string();
     for (key, value) in vars {
-        let needle = format!("{{{{{}}}}}", key);
+        let needle = format!("{{{{{key}}}}}");
         out = out.replace(&needle, value);
     }
     out

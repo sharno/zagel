@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -7,17 +7,18 @@ use iced::widget::{
     button, column, container, horizontal_rule, pick_list, row, scrollable, text, text_editor,
     text_input,
 };
-use iced::{time, Application, Command, Element, Length, Settings, Subscription, Theme};
+use iced::{Application, Command, Element, Length, Settings, Subscription, Theme, time};
 use reqwest::Client;
 
 use crate::model::{
     Collection, Environment, HttpFile, Method, RequestDraft, RequestId, ResponsePreview, UnsavedTab,
 };
 use crate::net::send_request;
-use crate::parser::scan_http_files;
+use crate::parser::{scan_env_files, scan_http_files};
+use crate::state::AppState;
 
-const HTTP_SCAN_MAX_DEPTH: usize = 6;
-const HTTP_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
+const FILE_SCAN_MAX_DEPTH: usize = 6;
+const FILE_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
 
 pub fn run() -> iced::Result {
     Zagel::run(Settings::default())
@@ -26,6 +27,7 @@ pub fn run() -> iced::Result {
 #[derive(Debug, Clone)]
 enum Message {
     HttpFilesLoaded(HashMap<PathBuf, HttpFile>),
+    EnvironmentsLoaded(Vec<Environment>),
     Tick,
     Select(RequestId),
     MethodSelected(Method),
@@ -52,6 +54,7 @@ struct Zagel {
     environments: Vec<Environment>,
     active_environment: usize,
     http_root: PathBuf,
+    state: AppState,
     client: Client,
     next_unsaved_id: u32,
 }
@@ -63,10 +66,14 @@ impl Application for Zagel {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Self::Message>) {
-        let http_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let state = AppState::load();
+        let http_root = state
+            .http_root
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        let mut app = Self {
-            collections: demo_collections(),
+        let app = Self {
+            collections: Vec::new(),
             http_files: HashMap::new(),
             unsaved_tabs: Vec::new(),
             selection: None,
@@ -75,23 +82,18 @@ impl Application for Zagel {
             body_editor: text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),
             last_response: None,
-            environments: demo_environments(),
+            environments: vec![default_environment()],
             active_environment: 0,
             http_root,
+            state,
             client: Client::new(),
             next_unsaved_id: 1,
         };
 
-        app.apply_selection(RequestId::Collection {
-            collection: 0,
-            index: 0,
-        });
-        let root = app.http_root.clone();
+        app.persist_state();
+        let command = app.rescan_files();
 
-        (
-            app,
-            Command::perform(scan_http_files(root, HTTP_SCAN_MAX_DEPTH), Message::HttpFilesLoaded),
-        )
+        (app, command)
     }
 
     fn title(&self) -> String {
@@ -99,21 +101,24 @@ impl Application for Zagel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        time::every(HTTP_SCAN_COOLDOWN).map(|_| Message::Tick)
+        time::every(FILE_SCAN_COOLDOWN).map(|_| Message::Tick)
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Tick => Command::perform(
-                scan_http_files(self.http_root.clone(), HTTP_SCAN_MAX_DEPTH),
-                Message::HttpFilesLoaded,
-            ),
+            Message::Tick => self.rescan_files(),
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
                 Command::none()
             }
+            Message::EnvironmentsLoaded(envs) => {
+                self.environments = with_default_environment(envs);
+                self.apply_saved_environment();
+                self.persist_state();
+                Command::none()
+            }
             Message::Select(id) => {
-                self.apply_selection(id);
+                self.apply_selection(&id);
                 Command::none()
             }
             Message::MethodSelected(method) => {
@@ -143,9 +148,10 @@ impl Application for Zagel {
                 self.next_unsaved_id += 1;
                 self.unsaved_tabs.push(UnsavedTab {
                     id,
-                    title: format!("Unsaved {}", id),
+                    title: format!("Unsaved {id}"),
                 });
-                self.apply_selection(RequestId::Unsaved(id));
+                let new_id = RequestId::Unsaved(id);
+                self.apply_selection(&new_id);
                 Command::none()
             }
             Message::Send => {
@@ -177,6 +183,8 @@ impl Application for Zagel {
                     .find(|(_, env)| env.name == name)
                 {
                     self.active_environment = idx;
+                    self.state.active_environment = Some(name);
+                    self.persist_state();
                 }
                 Command::none()
             }
@@ -188,7 +196,7 @@ impl Application for Zagel {
             &self.unsaved_tabs,
             &self.collections,
             &self.http_files,
-            self.selection.clone(),
+            self.selection.as_ref(),
         );
 
         let env_pick = pick_list(
@@ -227,7 +235,12 @@ impl Application for Zagel {
 
         let workspace = column![
             row![env_pick, title_input].spacing(12),
-            row![method_pick, url_input, button("Send").on_press(Message::Send)].spacing(8),
+            row![
+                method_pick,
+                url_input,
+                button("Send").on_press(Message::Send)
+            ]
+            .spacing(8),
             horizontal_rule(1),
             text("Headers"),
             headers_editor,
@@ -249,64 +262,25 @@ impl Application for Zagel {
     }
 }
 
-fn demo_collections() -> Vec<Collection> {
-    vec![Collection {
-        name: "Samples".to_string(),
-        requests: vec![
-            RequestDraft {
-                title: "Hello world".to_string(),
-                method: Method::Get,
-                url: "https://httpbin.org/get".to_string(),
-                headers: "Accept: application/json".to_string(),
-                body: String::new(),
-            },
-            RequestDraft {
-                title: "Post JSON".to_string(),
-                method: Method::Post,
-                url: "https://httpbin.org/post".to_string(),
-                headers: "Content-Type: application/json".to_string(),
-                body: r#"{"hello": "world"}"#.to_string(),
-            },
-        ],
-    }]
-}
-
-fn demo_environments() -> Vec<Environment> {
-    vec![
-        Environment {
-            name: "No environment".to_string(),
-            vars: std::collections::BTreeMap::new(),
-        },
-        Environment {
-            name: "Local dev".to_string(),
-            vars: std::collections::BTreeMap::from([
-                ("host".to_string(), "http://localhost:3000".to_string()),
-                ("token".to_string(), "dev-token-123".to_string()),
-            ]),
-        },
-    ]
-}
-
 fn build_sidebar(
     unsaved_tabs: &[UnsavedTab],
     collections: &[Collection],
     http_files: &HashMap<PathBuf, HttpFile>,
-    selection: Option<RequestId>,
+    selection: Option<&RequestId>,
 ) -> Element<'static, Message> {
-    let mut items = column![row![
-        text("Requests").size(18),
-        button("+").on_press(Message::AddUnsavedTab)
-    ]
-    .spacing(8)
-    .align_items(iced::Alignment::Center)];
+    let mut items = column![
+        row![
+            text("Requests").size(18),
+            button("+").on_press(Message::AddUnsavedTab)
+        ]
+        .spacing(8)
+        .align_items(iced::Alignment::Center)
+    ];
 
     if !unsaved_tabs.is_empty() {
         items = items.push(text("Unsaved tabs").size(14));
         for tab in unsaved_tabs {
-            let is_selected = selection
-                .as_ref()
-                .map(|id| *id == RequestId::Unsaved(tab.id))
-                .unwrap_or(false);
+            let is_selected = selection.is_some_and(|id| *id == RequestId::Unsaved(tab.id));
             items = items.push(
                 button(text(tab.title.clone()))
                     .width(Length::Fill)
@@ -328,7 +302,7 @@ fn build_sidebar(
                     path: file.path.clone(),
                     index: idx,
                 };
-                let is_selected = selection.as_ref().map(|s| *s == id).unwrap_or(false);
+                let is_selected = selection.is_some_and(|s| *s == id);
                 let label = format!(
                     "{} • {}",
                     req.title,
@@ -358,7 +332,7 @@ fn build_sidebar(
                 collection: c_idx,
                 index: r_idx,
             };
-            let is_selected = selection.as_ref().map(|s| *s == id).unwrap_or(false);
+            let is_selected = selection.is_some_and(|s| *s == id);
             items = items.push(
                 button(text(format!("{} • {}", req.method, req.title)))
                     .width(Length::Fill)
@@ -377,14 +351,29 @@ fn build_sidebar(
         .into()
 }
 
+fn default_environment() -> Environment {
+    Environment {
+        name: "No environment".to_string(),
+        vars: BTreeMap::new(),
+    }
+}
+
+fn with_default_environment(mut envs: Vec<Environment>) -> Vec<Environment> {
+    let mut all = Vec::with_capacity(envs.len() + 1);
+    all.push(default_environment());
+    all.append(&mut envs);
+    all
+}
+
 fn build_response(response: Option<&ResponsePreview>) -> Element<'static, Message> {
-    match response {
-        Some(resp) => {
+    response.map_or_else(
+        || container(text("No response yet")).padding(8).into(),
+        |resp| {
             let header = match (resp.status, resp.duration) {
                 (Some(status), Some(duration)) => {
-                    format!("HTTP {} in {} ms", status, duration.as_millis())
+                    format!("HTTP {status} in {} ms", duration.as_millis())
                 }
-                (Some(status), None) => format!("HTTP {}", status),
+                (Some(status), None) => format!("HTTP {status}"),
                 _ => "No response".to_string(),
             };
 
@@ -407,15 +396,52 @@ fn build_response(response: Option<&ResponsePreview>) -> Element<'static, Messag
             )
             .padding(8)
             .into()
-        }
-        None => container(text("No response yet")).padding(8).into(),
-    }
+        },
+    )
 }
 
 impl Zagel {
-    fn apply_selection(&mut self, id: RequestId) {
+    fn rescan_files(&self) -> Command<Message> {
+        Command::batch([
+            Command::perform(
+                scan_http_files(self.http_root.clone(), FILE_SCAN_MAX_DEPTH),
+                Message::HttpFilesLoaded,
+            ),
+            Command::perform(
+                scan_env_files(self.http_root.clone(), FILE_SCAN_MAX_DEPTH),
+                Message::EnvironmentsLoaded,
+            ),
+        ])
+    }
+
+    fn persist_state(&self) {
+        let mut state = self.state.clone();
+        state.http_root = Some(self.http_root.clone());
+        state.save();
+    }
+
+    fn apply_saved_environment(&mut self) {
+        if let Some(saved) = self.state.active_environment.clone()
+            && let Some((idx, _)) = self
+                .environments
+                .iter()
+                .enumerate()
+                .find(|(_, env)| env.name == saved)
+        {
+            self.active_environment = idx;
+            self.state.active_environment =
+                Some(self.environments[self.active_environment].name.clone());
+            return;
+        }
+        self.active_environment = 0;
+        if let Some(env) = self.environments.get(self.active_environment) {
+            self.state.active_environment = Some(env.name.clone());
+        }
+    }
+
+    fn apply_selection(&mut self, id: &RequestId) {
         self.selection = Some(id.clone());
-        let maybe_request = match &id {
+        let maybe_request = match id {
             RequestId::Collection { collection, index } => self
                 .collections
                 .get(*collection)

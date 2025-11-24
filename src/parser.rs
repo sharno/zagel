@@ -1,20 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use walkdir::WalkDir;
 
-use crate::model::{HttpFile, Method, RequestDraft};
+use crate::model::{Environment, HttpFile, Method, RequestDraft};
 
 pub async fn scan_http_files(root: PathBuf, max_depth: usize) -> HashMap<PathBuf, HttpFile> {
     let mut files = HashMap::new();
-    for entry in WalkDir::new(root)
-        .follow_links(true)
-        .max_depth(max_depth)
-    {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
+    for entry in WalkDir::new(root).follow_links(true).max_depth(max_depth) {
+        let Ok(entry) = entry else {
+            continue;
         };
         if !entry.file_type().is_file() {
             continue;
@@ -28,6 +24,28 @@ pub async fn scan_http_files(root: PathBuf, max_depth: usize) -> HashMap<PathBuf
         }
     }
     files
+}
+
+pub async fn scan_env_files(root: PathBuf, max_depth: usize) -> Vec<Environment> {
+    let mut envs = Vec::new();
+    for entry in WalkDir::new(root).follow_links(true).max_depth(max_depth) {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        if !is_env_file(entry.path()) {
+            continue;
+        }
+
+        if let Ok(env) = parse_env_file(entry.path()) {
+            envs.push(env);
+        }
+    }
+    envs.sort_by(|a, b| a.name.cmp(&b.name));
+    envs
 }
 
 pub fn parse_http_file(path: &Path) -> anyhow::Result<HttpFile> {
@@ -97,4 +115,41 @@ fn parse_request_block(lines: &[String]) -> Option<RequestDraft> {
         headers: headers.join("\n"),
         body: body.join("\n"),
     })
+}
+
+fn parse_env_file(path: &Path) -> anyhow::Result<Environment> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let mut vars = BTreeMap::new();
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once('=') {
+            vars.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    let name = path
+        .file_stem()
+        .or_else(|| path.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("environment")
+        .to_string();
+
+    Ok(Environment { name, vars })
+}
+
+fn is_env_file(path: &Path) -> bool {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if file_name.starts_with(".env") {
+        return true;
+    }
+
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("env"))
 }
