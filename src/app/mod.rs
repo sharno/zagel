@@ -1,24 +1,34 @@
+mod headers;
 mod hotkeys;
 mod messages;
+mod options;
 mod view;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use iced::{application, time, Subscription, Task, Theme};
+use iced::clipboard;
+use iced::{Subscription, Task, Theme, application, time};
 use reqwest::Client;
 
 use crate::model::{
-    Collection, Environment, HttpFile, RequestDraft, RequestId, ResponsePreview, UnsavedTab,
+    Collection, Environment, HttpFile, Method, RequestDraft, RequestId, ResponsePreview, UnsavedTab,
 };
 use crate::net::send_request;
 use crate::parser::{persist_request, scan_env_files, scan_http_files, suggest_http_path};
 use crate::state::AppState;
 pub use messages::Message;
+use options::{AuthState, RequestMode, apply_auth_headers, build_graphql_body};
 
 const FILE_SCAN_MAX_DEPTH: usize = 6;
 const FILE_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone)]
+pub struct HeaderRow {
+    pub name: String,
+    pub value: String,
+}
 
 pub fn run() -> iced::Result {
     application("Zagel • REST workbench", Zagel::update, view::view)
@@ -33,7 +43,6 @@ pub struct Zagel {
     pub(super) unsaved_tabs: Vec<UnsavedTab>,
     pub(super) selection: Option<RequestId>,
     pub(super) draft: RequestDraft,
-    pub(super) headers_editor: iced::widget::text_editor::Content,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
     pub(super) last_response: Option<ResponsePreview>,
@@ -45,6 +54,13 @@ pub struct Zagel {
     pub(super) next_unsaved_id: u32,
     pub(super) response_viewer: iced::widget::text_editor::Content,
     pub(super) save_path: String,
+    pub(super) mode: RequestMode,
+    pub(super) auth: AuthState,
+    pub(super) graphql_query: iced::widget::text_editor::Content,
+    pub(super) graphql_variables: iced::widget::text_editor::Content,
+    pub(super) header_rows: Vec<HeaderRow>,
+    pub(super) response_display: crate::app::view::ResponseDisplay,
+    pub(super) response_tab: crate::app::view::ResponseTab,
 }
 
 impl Zagel {
@@ -61,7 +77,6 @@ impl Zagel {
             unsaved_tabs: Vec::new(),
             selection: None,
             draft: RequestDraft::default(),
-            headers_editor: iced::widget::text_editor::Content::with_text(""),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),
             last_response: None,
@@ -71,8 +86,15 @@ impl Zagel {
             state,
             client: Client::new(),
             next_unsaved_id: 1,
-            response_viewer: iced::widget::text_editor::Content::with_text(""),
+            response_viewer: iced::widget::text_editor::Content::with_text("No response yet"),
             save_path: String::new(),
+            mode: RequestMode::Rest,
+            auth: AuthState::default(),
+            graphql_query: iced::widget::text_editor::Content::with_text(""),
+            graphql_variables: iced::widget::text_editor::Content::with_text("{}"),
+            header_rows: Vec::new(),
+            response_display: crate::app::view::ResponseDisplay::Pretty,
+            response_tab: crate::app::view::ResponseTab::Body,
         };
 
         let task = app.rescan_files();
@@ -121,9 +143,8 @@ impl Zagel {
                 self.draft.title = title;
                 Task::none()
             }
-            Message::HeadersEdited(action) => {
-                self.headers_editor.perform(action);
-                self.draft.headers = self.headers_editor.text();
+            Message::ModeChanged(mode) => {
+                self.mode = mode;
                 Task::none()
             }
             Message::BodyEdited(action) => {
@@ -131,6 +152,60 @@ impl Zagel {
                 self.draft.body = self.body_editor.text();
                 Task::none()
             }
+            Message::GraphqlQueryEdited(action) => {
+                self.graphql_query.perform(action);
+                Task::none()
+            }
+            Message::GraphqlVariablesEdited(action) => {
+                self.graphql_variables.perform(action);
+                Task::none()
+            }
+            Message::AuthChanged(new_auth) => {
+                self.auth = new_auth;
+                Task::none()
+            }
+            Message::HeaderNameChanged(idx, value) => {
+                if let Some(row) = self.header_rows.get_mut(idx) {
+                    row.name = value;
+                    self.rebuild_headers_from_rows();
+                }
+                Task::none()
+            }
+            Message::HeaderValueChanged(idx, value) => {
+                if let Some(row) = self.header_rows.get_mut(idx) {
+                    row.value = value;
+                    self.rebuild_headers_from_rows();
+                }
+                Task::none()
+            }
+            Message::HeaderAdded => {
+                self.header_rows.push(HeaderRow {
+                    name: String::new(),
+                    value: String::new(),
+                });
+                self.rebuild_headers_from_rows();
+                Task::none()
+            }
+            Message::HeaderRemoved(idx) => {
+                if idx < self.header_rows.len() {
+                    self.header_rows.remove(idx);
+                    self.rebuild_headers_from_rows();
+                }
+                Task::none()
+            }
+            Message::ResponseViewChanged(display) => {
+                self.response_display = display;
+                self.update_response_viewer();
+                Task::none()
+            }
+            Message::ResponseTabChanged(tab) => {
+                self.response_tab = tab;
+                Task::none()
+            }
+            Message::CopyResponseBody => {
+                clipboard::write(self.response_viewer.text()).map(|()| Message::CopyComplete)
+            }
+            Message::CopyComplete => Task::none(),
             Message::AddUnsavedTab => {
                 let id = self.next_unsaved_id;
                 self.next_unsaved_id += 1;
@@ -144,7 +219,17 @@ impl Zagel {
             }
             Message::Send => {
                 let env = self.environments.get(self.active_environment).cloned();
-                let draft = self.draft.clone();
+                let mut draft = self.draft.clone();
+                if self.mode == RequestMode::GraphQl {
+                    draft.method = Method::Post;
+                    let query = self.graphql_query.text();
+                    let variables = self.graphql_variables.text();
+                    draft.body = build_graphql_body(&query, &variables);
+                    if !draft.headers.contains("Content-Type") {
+                        draft.headers.push_str("\nContent-Type: application/json");
+                    }
+                }
+                draft.headers = apply_auth_headers(&draft.headers, &self.auth);
                 self.status_line = "Sending...".to_string();
                 Task::perform(
                     send_request(self.client.clone(), draft, env),
@@ -155,9 +240,6 @@ impl Zagel {
                 match result {
                     Ok(resp) => {
                         self.status_line = "Received response".to_string();
-                        let body_text = resp.body.clone().unwrap_or_else(|| "No body".to_string());
-                        self.response_viewer =
-                            iced::widget::text_editor::Content::with_text(&body_text);
                         self.last_response = Some(resp);
                     }
                     Err(err) => {
@@ -165,6 +247,7 @@ impl Zagel {
                         self.last_response = Some(ResponsePreview::error(err));
                     }
                 }
+                self.update_response_viewer();
                 Task::none()
             }
             Message::EnvironmentChanged(name) => {
@@ -287,14 +370,60 @@ impl Zagel {
             ..Default::default()
         });
         self.draft = draft.clone();
-        self.headers_editor = iced::widget::text_editor::Content::with_text(&draft.headers);
         self.body_editor = iced::widget::text_editor::Content::with_text(&draft.body);
+        self.set_header_rows_from_draft();
         self.save_path = match id {
             RequestId::HttpFile { path, .. } => path.display().to_string(),
             _ => suggest_http_path(&self.http_root, &draft.title)
                 .display()
                 .to_string(),
         };
+        self.update_response_viewer();
+    }
+
+    fn set_header_rows_from_draft(&mut self) {
+        self.header_rows.clear();
+        if self.draft.headers.is_empty() {
+            self.header_rows.push(HeaderRow {
+                name: String::new(),
+                value: String::new(),
+            });
+            return;
+        }
+        for line in self.draft.headers.lines() {
+            if let Some((name, value)) = line.split_once(':') {
+                self.header_rows.push(HeaderRow {
+                    name: name.trim().to_string(),
+                    value: value.trim().to_string(),
+                });
+            }
+        }
+    }
+
+    fn rebuild_headers_from_rows(&mut self) {
+        let lines: Vec<String> = self
+            .header_rows
+            .iter()
+            .filter(|row| !row.name.trim().is_empty())
+            .map(|row| format!("{}: {}", row.name.trim(), row.value.trim()))
+            .collect();
+        self.draft.headers = lines.join("\n");
+    }
+
+    fn update_response_viewer(&mut self) {
+        let body_text = self
+            .last_response
+            .as_ref()
+            .and_then(|resp| resp.error.clone().or_else(|| resp.body.clone()))
+            .unwrap_or_else(|| "No response yet".to_string());
+        let display_text = match (
+            self.response_display,
+            crate::app::view::pretty_json(&body_text),
+        ) {
+            (crate::app::view::ResponseDisplay::Pretty, Some(pretty)) => pretty,
+            _ => body_text,
+        };
+        self.response_viewer = iced::widget::text_editor::Content::with_text(&display_text);
     }
 }
 

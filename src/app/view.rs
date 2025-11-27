@@ -1,14 +1,19 @@
 use std::path::PathBuf;
 
+use iced::widget::text::Wrapping;
 use iced::widget::{
     button, column, container, horizontal_rule, pick_list, row, scrollable, text, text_editor,
     text_input,
 };
-use iced::{Element, Length};
+use iced::{Element, Length, Theme};
+use iced_highlighter::Theme as HighlightTheme;
 
+use super::headers;
+use super::options::{AuthKind, AuthState, RequestMode};
 use super::{Message, Zagel};
 use crate::model::{Collection, HttpFile, Method, RequestId, ResponsePreview, UnsavedTab};
 
+#[allow(clippy::too_many_lines)]
 pub fn view(app: &Zagel) -> Element<'_, Message> {
     let sidebar = build_sidebar(
         &app.unsaved_tabs,
@@ -42,14 +47,16 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
         .padding(6)
         .width(Length::Fill);
 
-    let headers_editor = text_editor(&app.headers_editor)
-        .on_action(Message::HeadersEdited)
-        .height(Length::Fixed(140.0));
-    let body_editor = text_editor(&app.body_editor)
+    let body_editor: iced::widget::TextEditor<'_, _, _, Theme> = text_editor(&app.body_editor)
         .on_action(Message::BodyEdited)
         .height(Length::Fixed(200.0));
 
-    let response_view = build_response(app.last_response.as_ref());
+    let response_view = build_response(
+        app.last_response.as_ref(),
+        &app.response_viewer,
+        app.response_display,
+        app.response_tab,
+    );
 
     let save_path_row: Element<'_, Message> = match &app.selection {
         Some(RequestId::HttpFile { path, .. }) => row![
@@ -69,8 +76,49 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
         .into(),
     };
 
+    let mode_pick = pick_list(
+        RequestMode::ALL.to_vec(),
+        Some(app.mode),
+        Message::ModeChanged,
+    );
+
+    let auth_editor = build_auth(&app.auth);
+
+    let graphql_panel: Element<'_, Message> = match app.mode {
+        RequestMode::GraphQl => {
+            let query_editor: iced::widget::TextEditor<'_, _, _, Theme> =
+                text_editor(&app.graphql_query)
+                    .on_action(Message::GraphqlQueryEdited)
+                    .height(Length::Fixed(180.0));
+            let vars_editor: iced::widget::TextEditor<'_, _, _, Theme> =
+                text_editor(&app.graphql_variables)
+                    .on_action(Message::GraphqlVariablesEdited)
+                    .height(Length::Fixed(120.0));
+            column![
+                text("GraphQL query"),
+                query_editor,
+                text("Variables (JSON)"),
+                vars_editor,
+            ]
+            .spacing(6)
+            .into()
+        }
+        RequestMode::Rest => column![text("Body"), body_editor].spacing(6).into(),
+    };
+
+    let mut status_row = row![
+        text(format!("Status: {}", app.status_line.clone())),
+        response_view_toggle(app.response_display),
+        response_tab_toggle(app.response_tab),
+    ]
+    .spacing(12);
+
+    if app.response_tab == ResponseTab::Body {
+        status_row = status_row.push(button("Copy body").on_press(Message::CopyResponseBody));
+    }
+
     let workspace = column![
-        row![env_pick, title_input].spacing(12),
+        row![env_pick, title_input, mode_pick].spacing(12),
         save_path_row,
         row![
             method_pick,
@@ -81,11 +129,13 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
         .spacing(8),
         horizontal_rule(1),
         text("Headers"),
-        headers_editor,
-        text("Body"),
-        body_editor,
+        headers::editor(&app.header_rows),
+        text("Auth"),
+        auth_editor,
         horizontal_rule(1),
-        text(format!("Status: {}", app.status_line.clone())),
+        graphql_panel,
+        horizontal_rule(1),
+        status_row,
         response_view,
     ]
     .padding(12)
@@ -187,7 +237,68 @@ fn build_sidebar<'a>(
         .into()
 }
 
-fn build_response(response: Option<&ResponsePreview>) -> Element<'static, Message> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseDisplay {
+    Raw,
+    Pretty,
+}
+
+impl ResponseDisplay {
+    pub const ALL: [Self; 2] = [Self::Raw, Self::Pretty];
+}
+
+impl std::fmt::Display for ResponseDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Raw => f.write_str("Raw"),
+            Self::Pretty => f.write_str("Pretty"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseTab {
+    Body,
+    Headers,
+}
+
+impl ResponseTab {
+    pub const ALL: [Self; 2] = [Self::Body, Self::Headers];
+}
+
+impl std::fmt::Display for ResponseTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Body => f.write_str("Body"),
+            Self::Headers => f.write_str("Headers"),
+        }
+    }
+}
+
+fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
+    pick_list(
+        ResponseTab::ALL.to_vec(),
+        Some(current),
+        Message::ResponseTabChanged,
+    )
+    .into()
+}
+
+fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Message> {
+    pick_list(
+        ResponseDisplay::ALL.to_vec(),
+        Some(current),
+        Message::ResponseViewChanged,
+    )
+    .into()
+}
+
+fn build_response<'a>(
+    response: Option<&ResponsePreview>,
+    content: &'a text_editor::Content,
+    display: ResponseDisplay,
+    tab: ResponseTab,
+) -> Element<'a, Message> {
     response.map_or_else(
         || container(text("No response yet")).padding(8).into(),
         |resp| {
@@ -214,22 +325,128 @@ fn build_response(response: Option<&ResponsePreview>) -> Element<'static, Messag
                 }
             }
 
-            container(
-                column![
-                    text(header).size(16),
-                    horizontal_rule(1),
-                    text("Headers").size(14),
-                    headers_view.spacing(4),
-                    horizontal_rule(1),
-                    text(body_text)
-                        .size(14)
-                        .width(Length::Fill)
-                        .shaping(iced::widget::text::Shaping::Advanced),
-                ]
-                .spacing(8),
-            )
-            .padding(8)
-            .into()
+            let body_is_pretty = pretty_json(&body_text).is_some();
+            let syntax = response_syntax(resp);
+            let body_editor = text_editor(content)
+                .height(Length::Fixed(260.0))
+                .highlight(syntax, HighlightTheme::SolarizedDark)
+                .wrapping(Wrapping::None);
+
+            let body_section: Element<'_, Message> = column![
+                text(format!(
+                    "Body ({})",
+                    match display {
+                        ResponseDisplay::Pretty if body_is_pretty => "pretty",
+                        ResponseDisplay::Pretty => "pretty (raw shown)",
+                        ResponseDisplay::Raw => "raw",
+                    }
+                ))
+                .size(14),
+                body_editor,
+            ]
+            .spacing(8)
+            .into();
+
+            let headers_section: Element<'_, Message> =
+                column![text("Headers").size(14), headers_view.spacing(4),]
+                    .spacing(8)
+                    .into();
+
+            let tab_view: Element<'_, Message> = match tab {
+                ResponseTab::Body => body_section,
+                ResponseTab::Headers => headers_section,
+            };
+
+            container(column![text(header).size(16), horizontal_rule(1), tab_view].spacing(8))
+                .padding(8)
+                .into()
         },
     )
+}
+
+pub fn pretty_json(raw: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .map(|v| serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw.to_string()))
+}
+
+fn response_syntax(resp: &ResponsePreview) -> &'static str {
+    let content_type = resp
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(_, value)| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if content_type.contains("json") {
+        "json"
+    } else if content_type.contains("html") {
+        "html"
+    } else if content_type.contains("xml") {
+        "xml"
+    } else if content_type.contains("javascript") {
+        "javascript"
+    } else if content_type.contains("css") {
+        "css"
+    } else {
+        "text"
+    }
+}
+
+fn build_auth(auth: &AuthState) -> Element<'_, Message> {
+    let kind_pick = pick_list(AuthKind::ALL.to_vec(), Some(auth.kind), |kind| {
+        Message::AuthChanged(AuthState {
+            kind,
+            ..auth.clone()
+        })
+    });
+
+    let fields: Element<'_, Message> = match auth.kind {
+        AuthKind::None => text("No authentication").into(),
+        AuthKind::Bearer => text_input("Bearer token", &auth.bearer_token)
+            .on_input(|val| {
+                let mut new = auth.clone();
+                new.bearer_token = val;
+                Message::AuthChanged(new)
+            })
+            .padding(6)
+            .width(Length::Fill)
+            .into(),
+        AuthKind::ApiKey => column![
+            text_input("Header name", &auth.api_key_name).on_input(|val| {
+                let mut new = auth.clone();
+                new.api_key_name = val;
+                Message::AuthChanged(new)
+            }),
+            text_input("Header value", &auth.api_key_value)
+                .on_input(|val| {
+                    let mut new = auth.clone();
+                    new.api_key_value = val;
+                    Message::AuthChanged(new)
+                })
+                .padding(6)
+                .width(Length::Fill),
+        ]
+        .spacing(6)
+        .into(),
+        AuthKind::Basic => column![
+            text_input("Username", &auth.basic_username).on_input(|val| {
+                let mut new = auth.clone();
+                new.basic_username = val;
+                Message::AuthChanged(new)
+            }),
+            text_input("Password", &auth.basic_password)
+                .on_input(|val| {
+                    let mut new = auth.clone();
+                    new.basic_password = val;
+                    Message::AuthChanged(new)
+                })
+                .padding(6)
+                .width(Length::Fill),
+        ]
+        .spacing(6)
+        .into(),
+    };
+
+    column![kind_pick, fields].spacing(6).into()
 }

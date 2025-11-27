@@ -19,7 +19,7 @@ cargo = "warn"
 
 [dependencies]
 anyhow = "1.0.89"
-iced = { version = "0.13.1", features = ["tokio", "image"] }
+iced = { version = "0.13.1", features = ["tokio", "image", "highlighter"] }
 iced_highlighter = "0.13.0"
 reqwest = { version = "0.12.8", default-features = false, features = [
     "json",
@@ -32,6 +32,7 @@ time = { version = "0.3.36", features = ["macros"] }
 walkdir = "2.5.0"
 dirs = "5.0.1"
 toml = "0.8.19"
+base64 = "0.22.1"
 
 [dev-dependencies]
 tempfile = "3.12.0"
