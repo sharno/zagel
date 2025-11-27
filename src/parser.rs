@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::fmt::Write as FmtWrite;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -280,7 +280,12 @@ mod tests {
             body: "{\"ok\":true}".into(),
         };
 
-        let (path, idx) = block_on(persist_request(root, None, draft.clone(), Some(target.clone())))
+        let (path, idx) = block_on(persist_request(
+            root,
+            None,
+            draft.clone(),
+            Some(target.clone()),
+        ))
         .expect("persist request");
 
         assert_eq!(path, target);
@@ -324,13 +329,8 @@ mod tests {
             index: 0,
         });
 
-        let (_path, idx) = block_on(persist_request(
-            root,
-            selection,
-            updated.clone(),
-            None,
-        ))
-        .expect("persist update");
+        let (_path, idx) = block_on(persist_request(root, selection, updated.clone(), None))
+            .expect("persist update");
 
         assert_eq!(idx, 0);
         let parsed = parse_http_file(&path).expect("parse updated");
