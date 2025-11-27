@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::fmt::Write as FmtWrite;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use walkdir::WalkDir;
 
-use crate::model::{Environment, HttpFile, Method, RequestDraft};
+use crate::model::{Environment, HttpFile, Method, RequestDraft, RequestId};
 
 pub async fn scan_http_files(root: PathBuf, max_depth: usize) -> HashMap<PathBuf, HttpFile> {
     let mut files = HashMap::new();
@@ -85,6 +87,104 @@ pub fn parse_http_file(path: &Path) -> anyhow::Result<HttpFile> {
     })
 }
 
+pub async fn persist_request(
+    http_root: PathBuf,
+    selection: Option<RequestId>,
+    draft: RequestDraft,
+    explicit_path: Option<PathBuf>,
+) -> anyhow::Result<(PathBuf, usize)> {
+    let (path, replace_index) = match (selection, explicit_path) {
+        (Some(RequestId::HttpFile { path, index }), None) => (path, Some(index)),
+        (_, Some(path)) => (path, None),
+        _ => (suggest_http_path(&http_root, &draft.title), None),
+    };
+
+    let mut requests = if path.exists() {
+        parse_http_file(&path)?.requests
+    } else {
+        Vec::new()
+    };
+
+    let index = if let Some(idx) = replace_index {
+        if idx < requests.len() {
+            requests[idx] = draft;
+            idx
+        } else {
+            requests.push(draft);
+            requests.len() - 1
+        }
+    } else {
+        requests.push(draft);
+        requests.len() - 1
+    };
+
+    write_http_file(&path, &requests)?;
+    Ok((path, index))
+}
+
+pub fn write_http_file(path: &Path, requests: &[RequestDraft]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+
+    let mut content = String::new();
+    for (idx, req) in requests.iter().enumerate() {
+        if idx > 0 {
+            content.push('\n');
+        }
+        writeln!(content, "### {}", req.title).ok();
+        content.push_str(&format_request_block(req));
+    }
+
+    fs::write(path, content)
+        .with_context(|| format!("Failed to write requests to {}", path.display()))
+}
+
+fn format_request_block(req: &RequestDraft) -> String {
+    let mut block = String::new();
+    writeln!(block, "{} {}", req.method.as_str(), req.url).ok();
+    let headers = req.headers.trim_end();
+    if !headers.is_empty() {
+        block.push_str(headers);
+        block.push('\n');
+    }
+    block.push('\n');
+    if !req.body.is_empty() {
+        block.push_str(&req.body);
+        block.push('\n');
+    }
+    block
+}
+
+pub fn suggest_http_path(root: &Path, title: &str) -> PathBuf {
+    let mut slug = title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else if c.is_whitespace() || c == '-' || c == '_' {
+                '-'
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    slug = slug
+        .trim_matches('-')
+        .trim_matches('_')
+        .trim()
+        .trim_end_matches('-')
+        .trim_end_matches('_')
+        .to_string();
+
+    if slug.is_empty() {
+        slug = "request".to_string();
+    }
+
+    root.join(format!("{slug}.http"))
+}
+
 fn parse_request_block(lines: &[String]) -> Option<RequestDraft> {
     let mut lines_iter = lines.iter().skip_while(|l| l.trim().is_empty());
     let first = lines_iter.next()?;
@@ -152,4 +252,94 @@ fn is_env_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("env"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use tempfile::tempdir;
+
+    #[test]
+    fn suggest_http_path_slugifies_title() {
+        let root = PathBuf::from("/tmp");
+        let path = suggest_http_path(&root, "My First Request!");
+        assert_eq!(path, root.join("my-first-request.http"));
+    }
+
+    #[test]
+    fn persist_request_creates_file_for_new_request() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("new.http");
+        let draft = RequestDraft {
+            title: "New".into(),
+            method: Method::Post,
+            url: "https://example.com".into(),
+            headers: "Content-Type: application/json".into(),
+            body: "{\"ok\":true}".into(),
+        };
+
+        let (path, idx) = block_on(persist_request(root, None, draft.clone(), Some(target.clone())))
+        .expect("persist request");
+
+        assert_eq!(path, target);
+        assert_eq!(idx, 0);
+
+        let parsed = parse_http_file(&path).expect("parse saved file");
+        assert_eq!(parsed.requests.len(), 1);
+        let saved = &parsed.requests[0];
+        assert_eq!(saved.title, draft.url);
+        assert_eq!(saved.method, draft.method);
+        assert_eq!(saved.url, draft.url);
+        assert_eq!(saved.headers.trim(), draft.headers.trim());
+        assert_eq!(saved.body.trim(), draft.body.trim());
+    }
+
+    #[test]
+    fn persist_request_replaces_existing_index() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let path = root.join("existing.http");
+
+        let original = RequestDraft {
+            title: "Original".into(),
+            method: Method::Get,
+            url: "https://example.com/old".into(),
+            headers: String::new(),
+            body: String::new(),
+        };
+        write_http_file(&path, &[original]).expect("write original");
+
+        let updated = RequestDraft {
+            title: "Updated".into(),
+            method: Method::Delete,
+            url: "https://example.com/new".into(),
+            headers: "Authorization: test".into(),
+            body: "hi".into(),
+        };
+
+        let selection = Some(RequestId::HttpFile {
+            path: path.clone(),
+            index: 0,
+        });
+
+        let (_path, idx) = block_on(persist_request(
+            root,
+            selection,
+            updated.clone(),
+            None,
+        ))
+        .expect("persist update");
+
+        assert_eq!(idx, 0);
+        let parsed = parse_http_file(&path).expect("parse updated");
+        assert_eq!(parsed.requests.len(), 1);
+        let saved = &parsed.requests[0];
+        assert_eq!(saved.title, updated.url);
+        assert_eq!(saved.method, updated.method);
+        assert_eq!(saved.url, updated.url);
+        assert_eq!(saved.headers.trim(), updated.headers.trim());
+        assert_eq!(saved.body.trim(), updated.body.trim());
+    }
 }

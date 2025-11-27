@@ -32,6 +32,16 @@ pub async fn send_request(
         .send()
         .await
         .map_err(|e| e.to_string())?;
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), v.to_string()))
+        })
+        .collect();
     let status = response.status().as_u16();
     let text = response
         .text()
@@ -43,6 +53,7 @@ pub async fn send_request(
         status: Some(status),
         duration: Some(duration),
         body: Some(text),
+        headers,
         error: None,
     })
 }

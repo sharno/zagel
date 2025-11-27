@@ -112,6 +112,7 @@ pub struct ResponsePreview {
     pub status: Option<u16>,
     pub duration: Option<Duration>,
     pub body: Option<String>,
+    pub headers: Vec<(String, String)>,
     pub error: Option<String>,
 }
 
@@ -121,6 +122,7 @@ impl ResponsePreview {
             status: None,
             duration: None,
             body: None,
+            headers: Vec::new(),
             error: Some(message),
         }
     }
