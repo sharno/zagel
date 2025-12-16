@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_rule, pick_list, row, scrollable, text, text_editor,
-    text_input,
+    button, column, container, pick_list, row, rule, scrollable, text, text_editor, text_input,
 };
 use iced::{Element, Length, Theme};
 use iced_highlighter::Theme as HighlightTheme;
@@ -127,14 +126,14 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
             button("Send").on_press(Message::Send)
         ]
         .spacing(8),
-        horizontal_rule(1),
+        rule::horizontal(1),
         text("Headers"),
         headers::editor(&app.header_rows),
         text("Auth"),
         auth_editor,
-        horizontal_rule(1),
+        rule::horizontal(1),
         graphql_panel,
-        horizontal_rule(1),
+        rule::horizontal(1),
         status_row,
         response_view,
     ]
@@ -357,7 +356,7 @@ fn build_response<'a>(
                 ResponseTab::Headers => headers_section,
             };
 
-            container(column![text(header).size(16), horizontal_rule(1), tab_view].spacing(8))
+            container(column![text(header).size(16), rule::horizontal(1), tab_view].spacing(8))
                 .padding(8)
                 .into()
         },

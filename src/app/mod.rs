@@ -31,10 +31,11 @@ pub struct HeaderRow {
 }
 
 pub fn run() -> iced::Result {
-    application("Zagel • REST workbench", Zagel::update, view::view)
+    application(Zagel::init, Zagel::update, view::view)
+        .title("Zagel • REST workbench")
         .subscription(Zagel::subscription)
         .theme(Zagel::theme)
-        .run_with(Zagel::init)
+        .run()
 }
 
 pub struct Zagel {
