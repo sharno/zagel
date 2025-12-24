@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,6 +13,8 @@ jobs:
   build:
     name: Build release binaries (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    env:
+      BIN_NAME: zagel
     strategy:
       fail-fast: false
       matrix:
@@ -65,14 +68,16 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          tar -C target/${{ matrix.target }}/release -czf dist/zagel-${{ matrix.target }}.tar.gz zagel
+          archive="dist/${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}.${{ matrix.asset_ext }}"
+          tar -C target/${{ matrix.target }}/release -czf "$archive" "$BIN_NAME"
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "target\\${{ matrix.target }}\\release\\zagel.exe" -DestinationPath "dist\\zagel-${{ matrix.target }}.zip" -Force
+          $archive = "dist/${env:BIN_NAME}-${env:GITHUB_REF_NAME}-${{ matrix.target }}.${{ matrix.asset_ext }}"
+          Compress-Archive -Path "target\\${{ matrix.target }}\\release\\${env:BIN_NAME}.exe" -DestinationPath $archive -Force
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
