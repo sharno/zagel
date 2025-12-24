@@ -4,7 +4,7 @@ mod messages;
 mod options;
 mod view;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ impl Zagel {
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        let app = Self {
+        let mut app = Self {
             collections: Vec::new(),
             http_files: HashMap::new(),
             unsaved_tabs: Vec::new(),
@@ -100,6 +100,7 @@ impl Zagel {
 
         let task = app.rescan_files();
         app.persist_state();
+        app.update_status_with_missing("Ready");
         (app, task)
     }
 
@@ -126,6 +127,7 @@ impl Zagel {
                 self.environments = with_default_environment(envs);
                 self.apply_saved_environment();
                 self.persist_state();
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::Select(id) => {
@@ -138,6 +140,7 @@ impl Zagel {
             }
             Message::UrlChanged(url) => {
                 self.draft.url = url;
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::TitleChanged(title) => {
@@ -146,19 +149,23 @@ impl Zagel {
             }
             Message::ModeChanged(mode) => {
                 self.mode = mode;
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::BodyEdited(action) => {
                 self.body_editor.perform(action);
                 self.draft.body = self.body_editor.text();
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::GraphqlQueryEdited(action) => {
                 self.graphql_query.perform(action);
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::GraphqlVariablesEdited(action) => {
                 self.graphql_variables.perform(action);
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::AuthChanged(new_auth) => {
@@ -170,6 +177,7 @@ impl Zagel {
                     row.name = value;
                     self.rebuild_headers_from_rows();
                 }
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::HeaderValueChanged(idx, value) => {
@@ -177,6 +185,7 @@ impl Zagel {
                     row.value = value;
                     self.rebuild_headers_from_rows();
                 }
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::HeaderAdded => {
@@ -185,6 +194,7 @@ impl Zagel {
                     value: String::new(),
                 });
                 self.rebuild_headers_from_rows();
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::HeaderRemoved(idx) => {
@@ -192,6 +202,7 @@ impl Zagel {
                     self.header_rows.remove(idx);
                     self.rebuild_headers_from_rows();
                 }
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::ResponseViewChanged(display) => {
@@ -221,17 +232,22 @@ impl Zagel {
             Message::Send => {
                 let env = self.environments.get(self.active_environment).cloned();
                 let mut draft = self.draft.clone();
+                let mut extra_inputs: Vec<String> = Vec::new();
                 if self.mode == RequestMode::GraphQl {
                     draft.method = Method::Post;
                     let query = self.graphql_query.text();
                     let variables = self.graphql_variables.text();
+                    extra_inputs.push(query.clone());
+                    extra_inputs.push(variables.clone());
                     draft.body = build_graphql_body(&query, &variables);
                     if !draft.headers.contains("Content-Type") {
                         draft.headers.push_str("\nContent-Type: application/json");
                     }
                 }
                 draft.headers = apply_auth_headers(&draft.headers, &self.auth);
-                self.status_line = "Sending...".to_string();
+                let extra_refs: Vec<&str> = extra_inputs.iter().map(|s| s.as_str()).collect();
+                self.status_line =
+                    status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
                 Task::perform(
                     send_request(self.client.clone(), draft, env),
                     Message::ResponseReady,
@@ -240,11 +256,11 @@ impl Zagel {
             Message::ResponseReady(result) => {
                 match result {
                     Ok(resp) => {
-                        self.status_line = "Received response".to_string();
+                        self.update_status_with_missing("Received response");
                         self.last_response = Some(resp);
                     }
                     Err(err) => {
-                        self.status_line = "Request failed".to_string();
+                        self.update_status_with_missing("Request failed");
                         self.last_response = Some(ResponsePreview::error(err));
                     }
                 }
@@ -262,6 +278,7 @@ impl Zagel {
                     self.state.active_environment = Some(name);
                     self.persist_state();
                 }
+                self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::Save => {
@@ -273,13 +290,14 @@ impl Zagel {
                 } else {
                     let path = self.save_path.trim();
                     if path.is_empty() {
-                        self.status_line =
-                            "Choose a path to save the request (Ctrl/Cmd+S)".to_string();
+                        self.update_status_with_missing(
+                            "Choose a path to save the request (Ctrl/Cmd+S)",
+                        );
                         return Task::none();
                     }
                     Some(PathBuf::from(path))
                 };
-                self.status_line = "Saving...".to_string();
+                self.update_status_with_missing("Saving...");
                 Task::perform(
                     async move {
                         persist_request(root, selection, draft, explicit_path)
@@ -299,11 +317,11 @@ impl Zagel {
                         index,
                     };
                     self.selection = Some(id);
-                    self.status_line = format!("Saved to {}", path.display());
+                    self.update_status_with_missing(&format!("Saved to {}", path.display()));
                     Task::batch([Task::none(), self.rescan_files()])
                 }
                 Err(err) => {
-                    self.status_line = format!("Save failed: {err}");
+                    self.update_status_with_missing(&format!("Save failed: {err}"));
                     Task::none()
                 }
             },
@@ -379,6 +397,7 @@ impl Zagel {
                 .display()
                 .to_string(),
         };
+        self.update_status_with_missing("Ready");
         self.update_response_viewer();
     }
 
@@ -426,6 +445,17 @@ impl Zagel {
         };
         self.response_viewer = iced::widget::text_editor::Content::with_text(&display_text);
     }
+
+    fn update_status_with_missing(&mut self, base: &str) {
+        let env = self.environments.get(self.active_environment);
+        let extras = if self.mode == RequestMode::GraphQl {
+            vec![self.graphql_query.text(), self.graphql_variables.text()]
+        } else {
+            Vec::new()
+        };
+        let extra_refs: Vec<&str> = extras.iter().map(|s| s.as_str()).collect();
+        self.status_line = status_with_missing(base, &self.draft, env, &extra_refs);
+    }
 }
 
 fn default_environment() -> Environment {
@@ -440,4 +470,65 @@ fn with_default_environment(mut envs: Vec<Environment>) -> Vec<Environment> {
     all.push(default_environment());
     all.append(&mut envs);
     all
+}
+
+fn status_with_missing(
+    base: &str,
+    draft: &RequestDraft,
+    env: Option<&Environment>,
+    extra_inputs: &[&str],
+) -> String {
+    let missing = missing_env_vars(draft, env, extra_inputs);
+    if missing.is_empty() {
+        base.to_string()
+    } else {
+        let env_name = env.map(|e| e.name.as_str()).unwrap_or("environment");
+        format!("{base} — Missing variables in {env_name}: {}", missing.join(", "))
+    }
+}
+
+fn missing_env_vars(
+    draft: &RequestDraft,
+    env: Option<&Environment>,
+    extra_inputs: &[&str],
+) -> Vec<String> {
+    let mut placeholders = BTreeSet::new();
+    for text in [&draft.url, &draft.headers, &draft.body] {
+        for name in collect_placeholders(text) {
+            placeholders.insert(name);
+        }
+    }
+    for text in extra_inputs {
+        for name in collect_placeholders(text) {
+            placeholders.insert(name);
+        }
+    }
+
+    let env_vars = env.map(|e| &e.vars);
+    placeholders
+        .into_iter()
+        .filter(|name| env_vars.map_or(true, |vars| !vars.contains_key(name)))
+        .collect()
+}
+
+fn collect_placeholders(input: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut search_start = 0;
+
+    while let Some(open_rel) = input[search_start..].find("{{") {
+        let open = search_start + open_rel;
+        let after_open = open + 2;
+        if let Some(close_rel) = input[after_open..].find("}}") {
+            let close = after_open + close_rel;
+            let candidate = input[after_open..close].trim();
+            if !candidate.is_empty() {
+                names.push(candidate.to_string());
+            }
+            search_start = close + 2;
+        } else {
+            break;
+        }
+    }
+
+    names
 }

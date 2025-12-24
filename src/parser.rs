@@ -59,12 +59,14 @@ pub fn parse_http_file(path: &Path) -> anyhow::Result<HttpFile> {
     for line in content.lines() {
         if line.trim_start().starts_with("###") {
             if !current.is_empty() {
+                trim_trailing_empty(&mut current);
                 blocks.push(std::mem::take(&mut current));
             }
         } else {
             current.push(line.to_string());
         }
     }
+    trim_trailing_empty(&mut current);
     if !current.is_empty() {
         blocks.push(current);
     }
@@ -138,6 +140,15 @@ pub fn write_http_file(path: &Path, requests: &[RequestDraft]) -> anyhow::Result
 
     fs::write(path, content)
         .with_context(|| format!("Failed to write requests to {}", path.display()))
+}
+
+fn trim_trailing_empty(lines: &mut Vec<String>) {
+    while lines
+        .last()
+        .is_some_and(|line| line.trim().is_empty())
+    {
+        lines.pop();
+    }
 }
 
 fn format_request_block(req: &RequestDraft) -> String {

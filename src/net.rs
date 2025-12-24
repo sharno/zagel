@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use reqwest::Client;
@@ -9,10 +10,31 @@ pub async fn send_request(
     draft: RequestDraft,
     env: Option<Environment>,
 ) -> Result<ResponsePreview, String> {
-    let env_vars = env.map(|e| e.vars).unwrap_or_default();
+    let (env_name, env_vars) = env
+        .map(|env| (Some(env.name), env.vars))
+        .unwrap_or((None, BTreeMap::new()));
     let url = apply_environment(&draft.url, &env_vars);
     let headers_text = apply_environment(&draft.headers, &env_vars);
     let body_text = apply_environment(&draft.body, &env_vars);
+
+    let mut log_lines = Vec::new();
+    if let Some(name) = env_name.as_deref() {
+        log_lines.push(format!("Environment: {name}"));
+    }
+    log_lines.push(format!("{} {url}", draft.method.as_str()));
+    if !headers_text.trim().is_empty() {
+        log_lines.push("Headers:".to_string());
+        for line in headers_text.lines().filter(|line| !line.trim().is_empty()) {
+            log_lines.push(format!("  {line}"));
+        }
+    }
+    if !body_text.trim().is_empty() {
+        log_lines.push("Body:".to_string());
+        log_lines.push(body_text.clone());
+    }
+    if !log_lines.is_empty() {
+        println!("{}", log_lines.join("\n"));
+    }
 
     let mut req = client.request(
         reqwest::Method::from_bytes(draft.method.as_str().as_bytes())

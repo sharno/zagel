@@ -1,0 +1,14 @@
+### https://example.com/comments
+POST https://example.com/comments
+content-type: application/json
+
+{
+    "name": "sample",
+    "time": "Wed, 21 Oct 2015 18:27:50 GMT"
+}
+
+### https://example.com/comments/4
+GET https://example.com/comments/4
+content-type: application/json
+Authorization: {{API_KEY}}
+
