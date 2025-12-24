@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use iced::widget::pane_grid;
 use iced::widget::text_editor;
 
 use crate::model::{Environment, HttpFile, Method, RequestId, ResponsePreview};
@@ -34,4 +35,5 @@ pub enum Message {
     ResponseTabChanged(crate::app::view::ResponseTab),
     CopyResponseBody,
     CopyComplete,
+    PaneResized(pane_grid::ResizeEvent),
 }

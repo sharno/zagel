@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
 use crate::model::{Method, RequestId, ResponsePreview, UnsavedTab};
@@ -17,6 +18,10 @@ impl Zagel {
             Message::Tick => self.rescan_files(),
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
+                Task::none()
+            }
+            Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.panes.resize(split, ratio);
                 Task::none()
             }
             Message::EnvironmentsLoaded(envs) => {

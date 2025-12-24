@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application, time};
 use reqwest::Client;
 
@@ -48,6 +49,7 @@ pub struct Zagel {
     pub(super) header_rows: Vec<HeaderRow>,
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
+    pub(super) panes: pane_grid::State<crate::app::view::PaneContent>,
 }
 
 impl Zagel {
@@ -57,6 +59,16 @@ impl Zagel {
             .http_root
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let (mut panes, sidebar) = pane_grid::State::new(super::view::PaneContent::Sidebar);
+        let split = panes.split(
+            pane_grid::Axis::Vertical,
+            sidebar,
+            super::view::PaneContent::Workspace,
+        );
+        if let Some((_, split)) = split {
+            panes.resize(split, 0.32);
+        }
 
         let mut app = Self {
             collections: Vec::new(),
@@ -82,6 +94,7 @@ impl Zagel {
             header_rows: Vec::new(),
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
+            panes,
         };
 
         let task = app.rescan_files();
