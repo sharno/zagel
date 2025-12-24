@@ -1,6 +1,6 @@
 # Zagel
 
-Zagel is a cross-platform, GUI REST workbench built with Rust + `iced`. It scans your workspace for request collections (`.http`) and environments (`.env`), lets you pick a request, edit it, and send it.
+Zagel is a cross-platform, GUI REST workbench built with Rust + `iced`. It scans your workspace for request collections (`.http`) and environments (`.env`), lets you pick a request, edit it, and send it. Think of it as a workspace-native alternative to Postman or Insomnia for teams that already keep requests in `.http` files.
 
 The UI is still rough around the edges but it's functioning with good keyboard shortcuts.
 <img width="2468" height="1440" alt="image" src="https://github.com/user-attachments/assets/962da7f6-1933-45c1-9a77-0f1181732147" />
@@ -73,3 +73,7 @@ Supported keys:
 - `env_root` (directory to scan for `*.env`, defaults to `http_root`)
 - `polling_interval_secs` (default `2`)
 - `scan_depth` (default `6`)
+
+## Contributing
+
+Contributions are welcome. See `CONTRIBUTING.md` for setup, linting, and the suggested workflow.
