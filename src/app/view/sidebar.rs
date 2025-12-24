@@ -7,7 +7,7 @@ use iced::{Element, Length};
 use super::super::Message;
 use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
-const INDENT: i16 = 14;
+const INDENT: i16 = 10;
 
 #[derive(Default)]
 struct TreeNode {
@@ -33,7 +33,7 @@ pub fn sidebar<'a>(
             text("Requests").size(18),
             button("Add").on_press(Message::AddRequest)
         ]
-        .spacing(8)
+        .spacing(6)
     ];
 
     let mut tree = TreeNode::default();
@@ -93,7 +93,7 @@ pub fn sidebar<'a>(
     items = items.push(text("Collections").size(14));
     items = render_tree(items, &tree, "", 0, selection, collapsed);
 
-    scrollable(items.spacing(6).padding(8))
+    scrollable(items.spacing(4).padding(6))
         .width(Length::Fill)
         .into()
 }
@@ -147,7 +147,7 @@ fn render_tree<'a>(
         let toggle_label = if is_collapsed { "▶" } else { "▼" };
         let toggle = button(text(toggle_label))
             .style(button::secondary)
-            .padding(4)
+            .padding(2)
             .on_press(Message::ToggleCollection(full_path.clone()));
 
         let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
@@ -178,7 +178,7 @@ fn render_tree<'a>(
             row_widgets = row_widgets.push(text(name).size(14));
         }
 
-        column = column.push(row_widgets.spacing(6));
+        column = column.push(row_widgets.spacing(4));
 
         if !is_collapsed {
             column = render_tree(column, child, &full_path, depth + 1, selection, collapsed);
@@ -200,7 +200,7 @@ fn render_tree<'a>(
                         .width(Length::Fill)
                         .on_press(Message::Select(item.id.clone())),
                 ]
-                .spacing(6),
+                .spacing(4),
             );
         }
     }

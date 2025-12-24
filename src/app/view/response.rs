@@ -56,7 +56,7 @@ pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
         })
         .on_press(Message::ResponseTabChanged(ResponseTab::Headers));
 
-    row![body, headers].spacing(8).into()
+    row![body, headers].spacing(6).into()
 }
 
 pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Message> {
@@ -75,7 +75,7 @@ pub fn response_panel<'a>(
     tab: ResponseTab,
 ) -> Element<'a, Message> {
     response.map_or_else(
-        || container(text("No response yet")).padding(8).into(),
+        || container(text("No response yet")).padding(6).into(),
         |resp| {
             let header = match (resp.status, resp.duration) {
                 (Some(status), Some(duration)) => {
@@ -119,12 +119,12 @@ pub fn response_panel<'a>(
                 .size(14),
                 body_editor,
             ]
-            .spacing(8)
+            .spacing(6)
             .into();
 
             let headers_section: Element<'_, Message> =
                 column![text("Headers").size(14), headers_view.spacing(4),]
-                    .spacing(8)
+                    .spacing(6)
                     .into();
 
             let tab_view: Element<'_, Message> = match tab {
@@ -132,8 +132,8 @@ pub fn response_panel<'a>(
                 ResponseTab::Headers => headers_section,
             };
 
-            container(column![text(header).size(16), rule::horizontal(1), tab_view].spacing(8))
-                .padding(8)
+            container(column![text(header).size(16), rule::horizontal(1), tab_view].spacing(6))
+                .padding(6)
                 .into()
         },
     )

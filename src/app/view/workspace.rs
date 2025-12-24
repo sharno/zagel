@@ -29,7 +29,7 @@ pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(10.0)
+    .spacing(8.0)
     .on_resize(6, Message::WorkspacePaneResized);
 
     container(workspace_grid)
@@ -45,7 +45,7 @@ fn builder(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(6.0)
+    .spacing(4.0)
     .on_resize(6, Message::BuilderPaneResized);
 
     builder_grid.into()
@@ -69,12 +69,12 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 
     let url_input = text_input("https://api.example.com", &app.draft.url)
         .on_input(Message::UrlChanged)
-        .padding(8)
+        .padding(6)
         .width(Length::Fill);
 
     let title_input = text_input("Title", &app.draft.title)
         .on_input(Message::TitleChanged)
-        .padding(6)
+        .padding(4)
         .width(Length::Fill);
 
     let save_path_row: Element<'_, Message> = match &app.selection {
@@ -82,16 +82,16 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
             text("Saving to").size(14),
             text(path.display().to_string()).size(14)
         ]
-        .spacing(8)
+        .spacing(6)
         .into(),
         _ => row![
             text("Save as").size(14),
             text_input("path/to/request.http", &app.save_path)
                 .on_input(Message::SavePathChanged)
-                .padding(6)
+                .padding(4)
                 .width(Length::Fill),
         ]
-        .spacing(8)
+        .spacing(6)
         .into(),
     };
 
@@ -104,7 +104,7 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
     let auth_view = auth_editor(&app.auth);
 
     let form_content = column![
-        row![env_pick, title_input, mode_pick].spacing(12),
+        row![env_pick, title_input, mode_pick].spacing(8),
         save_path_row,
         row![
             method_pick,
@@ -112,15 +112,15 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
             button("Save").on_press(Message::Save),
             button("Send").on_press(Message::Send)
         ]
-        .spacing(8),
+        .spacing(6),
         rule::horizontal(1),
         text("Headers"),
         headers::editor(&app.header_rows),
         text("Auth"),
         auth_view,
     ]
-    .padding(12)
-    .spacing(8);
+    .padding(8)
+    .spacing(6);
 
     scrollable(form_content).into()
 }
@@ -154,7 +154,7 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
         }
     };
 
-    container(column![graphql_panel].padding(12).spacing(8))
+    container(column![graphql_panel].padding(8).spacing(6))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -166,7 +166,7 @@ fn response(app: &Zagel) -> Element<'_, Message> {
         response_view_toggle(app.response_display),
         response_tab_toggle(app.response_tab),
     ]
-    .spacing(12);
+    .spacing(8);
 
     if matches!(app.response_tab, super::response::ResponseTab::Body) {
         status_row = status_row.push(button("Copy body").on_press(Message::CopyResponseBody));
@@ -181,8 +181,8 @@ fn response(app: &Zagel) -> Element<'_, Message> {
 
     scrollable(
         column![status_row, response_view]
-            .padding(12)
-            .spacing(8)
+            .padding(8)
+            .spacing(6)
             .width(Length::Fill),
     )
     .into()

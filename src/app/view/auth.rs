@@ -20,7 +20,7 @@ pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
                 new.bearer_token = val;
                 Message::AuthChanged(new)
             })
-            .padding(6)
+            .padding(4)
             .width(Length::Fill)
             .into(),
         AuthKind::ApiKey => column![
@@ -38,7 +38,7 @@ pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
                 .padding(6)
                 .width(Length::Fill),
         ]
-        .spacing(6)
+        .spacing(4)
         .into(),
         AuthKind::Basic => column![
             text_input("Username", &auth.basic_username).on_input(|val| {
@@ -52,12 +52,12 @@ pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
                     new.basic_password = val;
                     Message::AuthChanged(new)
                 })
-                .padding(6)
+                .padding(4)
                 .width(Length::Fill),
         ]
-        .spacing(6)
+        .spacing(4)
         .into(),
     };
 
-    column![kind_pick, fields].spacing(6).into()
+    column![kind_pick, fields].spacing(4).into()
 }

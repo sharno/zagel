@@ -37,7 +37,7 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(12.0)
+    .spacing(8.0)
     .on_resize(6, Message::PaneResized);
 
     container(grid).into()
