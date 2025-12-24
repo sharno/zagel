@@ -143,10 +143,7 @@ pub fn write_http_file(path: &Path, requests: &[RequestDraft]) -> anyhow::Result
 }
 
 fn trim_trailing_empty(lines: &mut Vec<String>) {
-    while lines
-        .last()
-        .is_some_and(|line| line.trim().is_empty())
-    {
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
         lines.pop();
     }
 }
