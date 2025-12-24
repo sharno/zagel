@@ -26,7 +26,7 @@ pub(super) fn status_with_missing(
     if missing.is_empty() {
         base.to_string()
     } else {
-        let env_name = env.map(|e| e.name.as_str()).unwrap_or("environment");
+        let env_name = env.map_or("environment", |e| e.name.as_str());
         format!(
             "{base} - Missing variables in {env_name}: {}",
             missing.join(", ")
@@ -54,7 +54,7 @@ fn missing_env_vars(
     let env_vars = env.map(|e| &e.vars);
     placeholders
         .into_iter()
-        .filter(|name| env_vars.map_or(true, |vars| !vars.contains_key(name)))
+        .filter(|name| env_vars.is_none_or(|vars| !vars.contains_key(name)))
         .collect()
 }
 

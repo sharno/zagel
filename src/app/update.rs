@@ -3,13 +3,19 @@ use std::path::PathBuf;
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
-use crate::model::{Method, RequestId, ResponsePreview, UnsavedTab};
+use crate::model::{Method, RequestDraft, RequestId, ResponsePreview, UnsavedTab};
 use crate::net::send_request;
 use crate::parser::persist_request;
 
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::{status_with_missing, with_default_environment};
 use super::{HeaderRow, Message, Zagel};
+
+const MIN_SPLIT_RATIO: f32 = 0.2;
+
+fn clamp_ratio(ratio: f32) -> f32 {
+    ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
+}
 
 #[allow(clippy::too_many_lines)]
 impl Zagel {
@@ -21,7 +27,21 @@ impl Zagel {
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-                self.panes.resize(split, ratio);
+                self.panes.resize(split, clamp_ratio(ratio));
+                Task::none()
+            }
+            Message::WorkspacePaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.workspace_panes.resize(split, clamp_ratio(ratio));
+                Task::none()
+            }
+            Message::BuilderPaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.builder_panes.resize(split, clamp_ratio(ratio));
+                Task::none()
+            }
+            Message::ToggleCollection(path) => {
+                if !self.collapsed_collections.remove(&path) {
+                    self.collapsed_collections.insert(path);
+                }
                 Task::none()
             }
             Message::EnvironmentsLoaded(envs) => {
@@ -120,14 +140,43 @@ impl Zagel {
             }
             Message::CopyComplete => Task::none(),
             Message::AddUnsavedTab => {
-                let id = self.next_unsaved_id;
-                self.next_unsaved_id += 1;
-                self.unsaved_tabs.push(UnsavedTab {
-                    id,
-                    title: format!("Unsaved {id}"),
-                });
-                let new_id = RequestId::Unsaved(id);
-                self.apply_selection(&new_id);
+                let new_draft = RequestDraft {
+                    title: "New request".to_string(),
+                    ..Default::default()
+                };
+                if let Some(RequestId::Collection { collection, .. }) = self.selection {
+                    if let Some(col) = self.collections.get_mut(collection) {
+                        col.requests.push(new_draft);
+                        let new_idx = col.requests.len() - 1;
+                        let new_id = RequestId::Collection {
+                            collection,
+                            index: new_idx,
+                        };
+                        self.apply_selection(&new_id);
+                        return Task::none();
+                    }
+                } else if let Some(RequestId::HttpFile { path, .. }) = self.selection.clone()
+                    && let Some(file) = self.http_files.get_mut(&path)
+                {
+                    file.requests.push(new_draft);
+                    let new_idx = file.requests.len() - 1;
+                    let new_id = RequestId::HttpFile {
+                        path,
+                        index: new_idx,
+                    };
+                    self.apply_selection(&new_id);
+                    return Task::none();
+                }
+                {
+                    let id = self.next_unsaved_id;
+                    self.next_unsaved_id += 1;
+                    self.unsaved_tabs.push(UnsavedTab {
+                        id,
+                        title: format!("Unsaved {id}"),
+                    });
+                    let new_id = RequestId::Unsaved(id);
+                    self.apply_selection(&new_id);
+                }
                 Task::none()
             }
             Message::Send => {
@@ -146,7 +195,10 @@ impl Zagel {
                     }
                 }
                 draft.headers = apply_auth_headers(&draft.headers, &self.auth);
-                let extra_refs: Vec<&str> = extra_inputs.iter().map(|s| s.as_str()).collect();
+                let extra_refs: Vec<&str> = extra_inputs
+                    .iter()
+                    .map(std::string::String::as_str)
+                    .collect();
                 self.status_line =
                     status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
                 Task::perform(

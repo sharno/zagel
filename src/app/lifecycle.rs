@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -50,6 +50,9 @@ pub struct Zagel {
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
     pub(super) panes: pane_grid::State<crate::app::view::PaneContent>,
+    pub(super) workspace_panes: pane_grid::State<crate::app::view::WorkspacePane>,
+    pub(super) builder_panes: pane_grid::State<crate::app::view::BuilderPane>,
+    pub(super) collapsed_collections: BTreeSet<String>,
 }
 
 impl Zagel {
@@ -67,7 +70,26 @@ impl Zagel {
             super::view::PaneContent::Workspace,
         );
         if let Some((_, split)) = split {
-            panes.resize(split, 0.32);
+            panes.resize(split, 0.26);
+        }
+
+        let (mut workspace_panes, builder) =
+            pane_grid::State::new(super::view::WorkspacePane::Builder);
+        if let Some((_, split)) = workspace_panes.split(
+            pane_grid::Axis::Vertical,
+            builder,
+            super::view::WorkspacePane::Response,
+        ) {
+            workspace_panes.resize(split, 0.6);
+        }
+
+        let (mut builder_panes, form) = pane_grid::State::new(super::view::BuilderPane::Form);
+        if let Some((_, split)) = builder_panes.split(
+            pane_grid::Axis::Horizontal,
+            form,
+            super::view::BuilderPane::Body,
+        ) {
+            builder_panes.resize(split, 0.55);
         }
 
         let mut app = Self {
@@ -95,6 +117,9 @@ impl Zagel {
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
             panes,
+            workspace_panes,
+            builder_panes,
+            collapsed_collections: BTreeSet::new(),
         };
 
         let task = app.rescan_files();
@@ -232,7 +257,7 @@ impl Zagel {
         } else {
             Vec::new()
         };
-        let extra_refs: Vec<&str> = extras.iter().map(|s| s.as_str()).collect();
+        let extra_refs: Vec<&str> = extras.iter().map(std::string::String::as_str).collect();
         self.status_line = status_with_missing(base, &self.draft, env, &extra_refs);
     }
 }

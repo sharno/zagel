@@ -12,6 +12,7 @@ use sidebar::sidebar;
 use workspace::workspace;
 
 pub use response::{ResponseDisplay, ResponseTab, pretty_json};
+pub use workspace::{BuilderPane, WorkspacePane};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PaneContent {
@@ -28,6 +29,8 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
             &app_ref.collections,
             &app_ref.http_files,
             app_ref.selection.as_ref(),
+            &app_ref.collapsed_collections,
+            &app_ref.http_root,
         ))
         .title_bar(pane_grid::TitleBar::new(text("Collections"))),
         PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref))

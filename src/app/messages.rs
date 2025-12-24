@@ -36,4 +36,7 @@ pub enum Message {
     CopyResponseBody,
     CopyComplete,
     PaneResized(pane_grid::ResizeEvent),
+    WorkspacePaneResized(pane_grid::ResizeEvent),
+    BuilderPaneResized(pane_grid::ResizeEvent),
+    ToggleCollection(String),
 }

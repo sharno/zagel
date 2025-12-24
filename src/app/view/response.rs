@@ -1,5 +1,5 @@
 use iced::widget::text::Wrapping;
-use iced::widget::{column, container, pick_list, rule, text, text_editor};
+use iced::widget::{button, column, container, pick_list, row, rule, text, text_editor};
 use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 
@@ -31,10 +31,6 @@ pub enum ResponseTab {
     Headers,
 }
 
-impl ResponseTab {
-    pub const ALL: [Self; 2] = [Self::Body, Self::Headers];
-}
-
 impl std::fmt::Display for ResponseTab {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -45,12 +41,22 @@ impl std::fmt::Display for ResponseTab {
 }
 
 pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
-    pick_list(
-        ResponseTab::ALL.to_vec(),
-        Some(current),
-        Message::ResponseTabChanged,
-    )
-    .into()
+    let body = button(text("Body"))
+        .style(if current == ResponseTab::Body {
+            button::primary
+        } else {
+            button::secondary
+        })
+        .on_press(Message::ResponseTabChanged(ResponseTab::Body));
+    let headers = button(text("Headers"))
+        .style(if current == ResponseTab::Headers {
+            button::primary
+        } else {
+            button::secondary
+        })
+        .on_press(Message::ResponseTabChanged(ResponseTab::Headers));
+
+    row![body, headers].spacing(8).into()
 }
 
 pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Message> {

@@ -10,9 +10,8 @@ pub async fn send_request(
     draft: RequestDraft,
     env: Option<Environment>,
 ) -> Result<ResponsePreview, String> {
-    let (env_name, env_vars) = env
-        .map(|env| (Some(env.name), env.vars))
-        .unwrap_or((None, BTreeMap::new()));
+    let (env_name, env_vars) =
+        env.map_or((None, BTreeMap::new()), |env| (Some(env.name), env.vars));
     let url = apply_environment(&draft.url, &env_vars);
     let headers_text = apply_environment(&draft.headers, &env_vars);
     let body_text = apply_environment(&draft.body, &env_vars);
