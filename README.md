@@ -2,6 +2,9 @@
 
 Zagel is a cross-platform, GUI REST workbench built with Rust + `iced`. It scans your workspace for request collections (`.http`) and environments (`.env`), lets you pick a request, edit it, and send it.
 
+The UI is still rough around the edges but it's functioning with good keyboard shortcuts.
+<img width="2468" height="1440" alt="image" src="https://github.com/user-attachments/assets/962da7f6-1933-45c1-9a77-0f1181732147" />
+
 ## Features
 
 - GUI request composer (method, URL, headers, body)
