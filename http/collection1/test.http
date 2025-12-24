@@ -1,3 +1,9 @@
+
+### https://jsonplaceholder.typicode.com/todos/1
+GET https://jsonplaceholder.typicode.com/todos/1
+content-type: application/json
+
+
 ### https://example.com/comments
 POST https://example.com/comments
 content-type: application/json
@@ -11,9 +17,3 @@ content-type: application/json
 GET https://example.com/comments/4
 content-type: application/json
 Authorization: {{API_KEY}}
-
-
-### https://jsonplaceholder.typicode.com/todos/1
-GET https://jsonplaceholder.typicode.com/todos/1
-content-type: application/json
-

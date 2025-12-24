@@ -6,9 +6,7 @@ use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application, time};
 use reqwest::Client;
 
-use crate::model::{
-    Collection, Environment, HttpFile, RequestDraft, RequestId, ResponsePreview, UnsavedTab,
-};
+use crate::model::{Collection, Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
 use crate::parser::{scan_env_files, scan_http_files, suggest_http_path};
 use crate::state::AppState;
 
@@ -28,7 +26,6 @@ pub struct HeaderRow {
 pub struct Zagel {
     pub(super) collections: Vec<Collection>,
     pub(super) http_files: HashMap<PathBuf, HttpFile>,
-    pub(super) unsaved_tabs: Vec<UnsavedTab>,
     pub(super) selection: Option<RequestId>,
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
@@ -39,7 +36,6 @@ pub struct Zagel {
     pub(super) http_root: PathBuf,
     pub(super) state: AppState,
     pub(super) client: Client,
-    pub(super) next_unsaved_id: u32,
     pub(super) response_viewer: iced::widget::text_editor::Content,
     pub(super) save_path: String,
     pub(super) mode: RequestMode,
@@ -95,7 +91,6 @@ impl Zagel {
         let mut app = Self {
             collections: Vec::new(),
             http_files: HashMap::new(),
-            unsaved_tabs: Vec::new(),
             selection: None,
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
@@ -106,7 +101,6 @@ impl Zagel {
             http_root,
             state,
             client: Client::new(),
-            next_unsaved_id: 1,
             response_viewer: iced::widget::text_editor::Content::with_text("No response yet"),
             save_path: String::new(),
             mode: RequestMode::Rest,
@@ -188,11 +182,10 @@ impl Zagel {
                 .http_files
                 .get(path)
                 .and_then(|file| file.requests.get(*index)),
-            RequestId::Unsaved(_) => None,
         };
 
         let draft = maybe_request.cloned().unwrap_or_else(|| RequestDraft {
-            title: "Unsaved request".to_string(),
+            title: "New request".to_string(),
             ..Default::default()
         });
         self.draft = draft.clone();
@@ -200,7 +193,7 @@ impl Zagel {
         self.set_header_rows_from_draft();
         self.save_path = match id {
             RequestId::HttpFile { path, .. } => path.display().to_string(),
-            _ => suggest_http_path(&self.http_root, &draft.title)
+            RequestId::Collection { .. } => suggest_http_path(&self.http_root, &draft.title)
                 .display()
                 .to_string(),
         };

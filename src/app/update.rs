@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
-use crate::model::{Method, RequestDraft, RequestId, ResponsePreview, UnsavedTab};
+use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
 use crate::net::send_request;
 use crate::parser::persist_request;
 
@@ -139,7 +139,7 @@ impl Zagel {
                 clipboard::write(self.response_viewer.text()).map(|()| Message::CopyComplete)
             }
             Message::CopyComplete => Task::none(),
-            Message::AddUnsavedTab => {
+            Message::AddRequest => {
                 let new_draft = RequestDraft {
                     title: "New request".to_string(),
                     ..Default::default()
@@ -158,25 +158,25 @@ impl Zagel {
                 } else if let Some(RequestId::HttpFile { path, .. }) = self.selection.clone()
                     && let Some(file) = self.http_files.get_mut(&path)
                 {
-                    file.requests.push(new_draft);
+                    file.requests.push(new_draft.clone());
                     let new_idx = file.requests.len() - 1;
                     let new_id = RequestId::HttpFile {
-                        path,
+                        path: path.clone(),
                         index: new_idx,
                     };
-                    self.apply_selection(&new_id);
-                    return Task::none();
+                    self.selection = Some(new_id);
+                    self.update_status_with_missing("Saving new request...");
+                    let http_root = self.http_root.clone();
+                    return Task::perform(
+                        async move {
+                            persist_request(http_root, None, new_draft, Some(path))
+                                .await
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::Saved,
+                    );
                 }
-                {
-                    let id = self.next_unsaved_id;
-                    self.next_unsaved_id += 1;
-                    self.unsaved_tabs.push(UnsavedTab {
-                        id,
-                        title: format!("Unsaved {id}"),
-                    });
-                    let new_id = RequestId::Unsaved(id);
-                    self.apply_selection(&new_id);
-                }
+                self.update_status_with_missing("Select a collection to add a request");
                 Task::none()
             }
             Message::Send => {
@@ -262,9 +262,6 @@ impl Zagel {
             }
             Message::Saved(result) => match result {
                 Ok((path, index)) => {
-                    if let Some(RequestId::Unsaved(id)) = self.selection.clone() {
-                        self.unsaved_tabs.retain(|tab| tab.id != id);
-                    }
                     let id = RequestId::HttpFile {
                         path: path.clone(),
                         index,

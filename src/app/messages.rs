@@ -16,7 +16,6 @@ pub enum Message {
     UrlChanged(String),
     TitleChanged(String),
     BodyEdited(text_editor::Action),
-    AddUnsavedTab,
     Send,
     ResponseReady(Result<ResponsePreview, String>),
     EnvironmentChanged(String),
@@ -39,4 +38,5 @@ pub enum Message {
     WorkspacePaneResized(pane_grid::ResizeEvent),
     BuilderPaneResized(pane_grid::ResizeEvent),
     ToggleCollection(String),
+    AddRequest,
 }

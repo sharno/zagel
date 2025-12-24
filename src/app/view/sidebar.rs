@@ -5,7 +5,7 @@ use iced::widget::{Space, button, column, row, scrollable, text};
 use iced::{Element, Length};
 
 use super::super::Message;
-use crate::model::{Collection, HttpFile, RequestDraft, RequestId, UnsavedTab};
+use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 14;
 
@@ -13,6 +13,7 @@ const INDENT: i16 = 14;
 struct TreeNode {
     children: BTreeMap<String, Self>,
     requests: Vec<RequestItem>,
+    file_path: Option<PathBuf>,
 }
 
 struct RequestItem {
@@ -21,7 +22,6 @@ struct RequestItem {
 }
 
 pub fn sidebar<'a>(
-    unsaved_tabs: &[UnsavedTab],
     collections: &'a [Collection],
     http_files: &'a HashMap<PathBuf, HttpFile>,
     selection: Option<&RequestId>,
@@ -31,27 +31,10 @@ pub fn sidebar<'a>(
     let mut items = column![
         row![
             text("Requests").size(18),
-            button("Add").on_press(Message::AddUnsavedTab)
+            button("Add").on_press(Message::AddRequest)
         ]
         .spacing(8)
     ];
-
-    if !unsaved_tabs.is_empty() {
-        items = items.push(text("Unsaved tabs").size(14));
-        for tab in unsaved_tabs {
-            let is_selected = selection.is_some_and(|id| *id == RequestId::Unsaved(tab.id));
-            let label = if is_selected {
-                format!("▶ {}", tab.title)
-            } else {
-                tab.title.clone()
-            };
-            items = items.push(
-                button(text(label))
-                    .width(Length::Fill)
-                    .on_press(Message::Select(RequestId::Unsaved(tab.id))),
-            );
-        }
-    }
 
     let mut tree = TreeNode::default();
 
@@ -64,6 +47,7 @@ pub fn sidebar<'a>(
         insert_collection(
             &mut tree,
             &segments,
+            None,
             collection
                 .requests
                 .iter()
@@ -92,6 +76,7 @@ pub fn sidebar<'a>(
         insert_collection(
             &mut tree,
             &segments.iter().map(String::as_str).collect::<Vec<_>>(),
+            Some(&file.path),
             file.requests
                 .iter()
                 .enumerate()
@@ -116,6 +101,7 @@ pub fn sidebar<'a>(
 fn insert_collection(
     root: &mut TreeNode,
     segments: &[&str],
+    file_path: Option<&PathBuf>,
     requests: impl Iterator<Item = RequestItem>,
 ) {
     if segments.is_empty() {
@@ -130,6 +116,9 @@ fn insert_collection(
         .children
         .entry(segments[segments.len() - 1].to_string())
         .or_default();
+    if leaf.file_path.is_none() {
+        leaf.file_path = file_path.cloned();
+    }
     leaf.requests.extend(requests);
 }
 
@@ -141,8 +130,12 @@ fn render_tree<'a>(
     selection: Option<&RequestId>,
     collapsed: &BTreeSet<String>,
 ) -> iced::widget::Column<'a, Message> {
-    let mut children: Vec<_> = node.children.iter().collect();
-    children.sort_by(|a, b| a.0.cmp(b.0));
+    let mut children: Vec<(String, &TreeNode)> = node
+        .children
+        .iter()
+        .map(|(name, child)| (name.clone(), child))
+        .collect();
+    children.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (name, child) in children {
         let full_path = if path.is_empty() {
@@ -152,17 +145,40 @@ fn render_tree<'a>(
         };
         let is_collapsed = collapsed.contains(&full_path);
         let toggle_label = if is_collapsed { "▶" } else { "▼" };
-        let toggle = button(text(format!("{toggle_label} {name}")).size(14))
+        let toggle = button(text(toggle_label))
             .style(button::secondary)
+            .padding(4)
             .on_press(Message::ToggleCollection(full_path.clone()));
 
-        column = column.push(
-            row![
-                Space::new().width(Length::Fixed(indent_px(depth))),
-                toggle.width(Length::Fill),
-            ]
-            .spacing(6),
-        );
+        let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
+
+        if let Some(file_path) = &child.file_path {
+            let is_selected = selection
+                .and_then(|id| match id {
+                    RequestId::HttpFile { path, .. } => Some(path),
+                    RequestId::Collection { .. } => None,
+                })
+                .is_some_and(|p| p == file_path);
+
+            let select_id = RequestId::HttpFile {
+                path: file_path.clone(),
+                index: 0,
+            };
+
+            let select_button = button(text(name).size(14))
+                .style(if is_selected {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .width(Length::Fill)
+                .on_press(Message::Select(select_id));
+            row_widgets = row_widgets.push(select_button);
+        } else {
+            row_widgets = row_widgets.push(text(name).size(14));
+        }
+
+        column = column.push(row_widgets.spacing(6));
 
         if !is_collapsed {
             column = render_tree(column, child, &full_path, depth + 1, selection, collapsed);

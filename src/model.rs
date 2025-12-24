@@ -94,17 +94,10 @@ pub struct HttpFile {
     pub requests: Vec<RequestDraft>,
 }
 
-#[derive(Debug, Clone)]
-pub struct UnsavedTab {
-    pub id: u32,
-    pub title: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RequestId {
     Collection { collection: usize, index: usize },
     HttpFile { path: PathBuf, index: usize },
-    Unsaved(u32),
 }
 
 #[derive(Debug, Clone)]
