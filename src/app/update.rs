@@ -56,44 +56,53 @@ impl Zagel {
                 Task::none()
             }
             Message::MethodSelected(method) => {
+                self.save_undo_state();
                 self.draft.method = method;
                 Task::none()
             }
             Message::UrlChanged(url) => {
+                self.save_undo_state();
                 self.draft.url = url;
                 self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::TitleChanged(title) => {
+                self.save_undo_state();
                 self.draft.title = title;
                 Task::none()
             }
             Message::ModeChanged(mode) => {
+                self.save_undo_state();
                 self.mode = mode;
                 self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::BodyEdited(action) => {
+                self.save_undo_state();
                 self.body_editor.perform(action);
                 self.draft.body = self.body_editor.text();
                 self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::GraphqlQueryEdited(action) => {
+                self.save_undo_state();
                 self.graphql_query.perform(action);
                 self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::GraphqlVariablesEdited(action) => {
+                self.save_undo_state();
                 self.graphql_variables.perform(action);
                 self.update_status_with_missing("Ready");
                 Task::none()
             }
             Message::AuthChanged(new_auth) => {
+                self.save_undo_state();
                 self.auth = new_auth;
                 Task::none()
             }
             Message::HeaderNameChanged(idx, value) => {
+                self.save_undo_state();
                 if let Some(row) = self.header_rows.get_mut(idx) {
                     row.name = value;
                     self.rebuild_headers_from_rows();
@@ -102,6 +111,7 @@ impl Zagel {
                 Task::none()
             }
             Message::HeaderValueChanged(idx, value) => {
+                self.save_undo_state();
                 if let Some(row) = self.header_rows.get_mut(idx) {
                     row.value = value;
                     self.rebuild_headers_from_rows();
@@ -110,6 +120,7 @@ impl Zagel {
                 Task::none()
             }
             Message::HeaderAdded => {
+                self.save_undo_state();
                 self.header_rows.push(HeaderRow {
                     name: String::new(),
                     value: String::new(),
@@ -119,6 +130,7 @@ impl Zagel {
                 Task::none()
             }
             Message::HeaderRemoved(idx) => {
+                self.save_undo_state();
                 if idx < self.header_rows.len() {
                     self.header_rows.remove(idx);
                     self.rebuild_headers_from_rows();
@@ -277,6 +289,38 @@ impl Zagel {
             },
             Message::SavePathChanged(path) => {
                 self.save_path = path;
+                Task::none()
+            }
+            Message::Undo => {
+                if let Some(state) = self.undo_stack.pop() {
+                    let current_state = super::lifecycle::UndoableState {
+                        draft: self.draft.clone(),
+                        body_text: self.body_editor.text(),
+                        header_rows: self.header_rows.clone(),
+                    };
+                    self.redo_stack.push(current_state);
+
+                    self.restore_state(&state);
+                    self.update_status_with_missing("Undo");
+                } else {
+                    self.update_status_with_missing("Nothing to undo");
+                }
+                Task::none()
+            }
+            Message::Redo => {
+                if let Some(state) = self.redo_stack.pop() {
+                    let current_state = super::lifecycle::UndoableState {
+                        draft: self.draft.clone(),
+                        body_text: self.body_editor.text(),
+                        header_rows: self.header_rows.clone(),
+                    };
+                    self.undo_stack.push(current_state);
+
+                    self.restore_state(&state);
+                    self.update_status_with_missing("Redo");
+                } else {
+                    self.update_status_with_missing("Nothing to redo");
+                }
                 Task::none()
             }
         }
