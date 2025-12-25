@@ -2,7 +2,7 @@ use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, text, text_editor, text_input,
 };
-use iced::{Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme};
 
 use super::super::{Message, Zagel, headers};
 use super::auth::auth_editor;
@@ -21,6 +21,12 @@ pub enum BuilderPane {
     Form,
     Body,
 }
+
+const ENV_PICK_MAX_WIDTH: f32 = 180.0;
+const MODE_PICK_MAX_WIDTH: f32 = 150.0;
+const METHOD_PICK_MAX_WIDTH: f32 = 120.0;
+const ACTION_WIDTH: f32 = 76.0;
+const LABEL_WIDTH: f32 = 76.0;
 
 pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     let workspace_grid = PaneGrid::new(&app.workspace_panes, move |_, pane, _| match pane {
@@ -52,66 +58,94 @@ fn builder(app: &Zagel) -> Element<'_, Message> {
 }
 
 fn builder_form(app: &Zagel) -> Element<'_, Message> {
-    let env_pick = pick_list(
+    let env_pick = container(
+        pick_list(
         app.environments
             .iter()
             .map(|e| e.name.clone())
             .collect::<Vec<_>>(),
         Some(app.environments[app.active_environment].name.clone()),
         Message::EnvironmentChanged,
-    );
+        )
+        .width(Length::Fill),
+    )
+    .width(Length::FillPortion(2))
+    .max_width(ENV_PICK_MAX_WIDTH);
 
-    let method_pick = pick_list(
+    let method_pick = container(
+        pick_list(
         Method::ALL.to_vec(),
         Some(app.draft.method),
         Message::MethodSelected,
-    );
+        )
+        .width(Length::Fill),
+    )
+    .width(Length::FillPortion(2))
+    .max_width(METHOD_PICK_MAX_WIDTH);
 
     let url_input = text_input("https://api.example.com", &app.draft.url)
         .on_input(Message::UrlChanged)
         .padding(6)
-        .width(Length::Fill);
+        .width(Length::FillPortion(6));
 
     let title_input = text_input("Title", &app.draft.title)
         .on_input(Message::TitleChanged)
         .padding(4)
-        .width(Length::Fill);
+        .width(Length::FillPortion(5));
 
     let save_path_row: Element<'_, Message> = match &app.selection {
         Some(RequestId::HttpFile { path, .. }) => row![
-            text("Saving to").size(14),
-            text(path.display().to_string()).size(14)
+            container(text("Saving to").size(14)).width(Length::Fixed(LABEL_WIDTH)),
+            container(text(path.display().to_string()).size(14)).width(Length::Fill)
         ]
+        .align_y(Alignment::Center)
         .spacing(6)
         .into(),
         _ => row![
-            text("Save as").size(14),
+            container(text("Save as").size(14)).width(Length::Fixed(LABEL_WIDTH)),
             text_input("path/to/request.http", &app.save_path)
                 .on_input(Message::SavePathChanged)
                 .padding(4)
                 .width(Length::Fill),
         ]
+        .align_y(Alignment::Center)
         .spacing(6)
         .into(),
     };
 
-    let mode_pick = pick_list(
+    let mode_pick = container(
+        pick_list(
         RequestMode::ALL.to_vec(),
         Some(app.mode),
         Message::ModeChanged,
-    );
+        )
+        .width(Length::Fill),
+    )
+    .width(Length::FillPortion(2))
+    .max_width(MODE_PICK_MAX_WIDTH);
 
     let auth_view = auth_editor(&app.auth);
 
     let form_content = column![
-        row![env_pick, title_input, mode_pick].spacing(8),
+        row![
+            title_input,
+            button("Save")
+                .on_press(Message::Save)
+                .width(Length::Fixed(ACTION_WIDTH)),
+            env_pick,
+            mode_pick
+        ]
+        .align_y(Alignment::Center)
+        .spacing(6),
         save_path_row,
         row![
             method_pick,
             url_input,
-            button("Save").on_press(Message::Save),
-            button("Send").on_press(Message::Send)
+            button("Send")
+                .on_press(Message::Send)
+                .width(Length::Fixed(ACTION_WIDTH))
         ]
+        .align_y(Alignment::Center)
         .spacing(6),
         rule::horizontal(1),
         text("Headers"),
@@ -131,17 +165,18 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
             let query_editor: iced::widget::TextEditor<'_, _, _, Theme> =
                 text_editor(&app.graphql_query)
                     .on_action(Message::GraphqlQueryEdited)
-                    .height(Length::Fixed(180.0));
+                    .height(Length::FillPortion(3));
             let vars_editor: iced::widget::TextEditor<'_, _, _, Theme> =
                 text_editor(&app.graphql_variables)
                     .on_action(Message::GraphqlVariablesEdited)
-                    .height(Length::Fixed(120.0));
+                    .height(Length::FillPortion(2));
             column![
                 text("GraphQL query"),
                 query_editor,
                 text("Variables (JSON)"),
                 vars_editor,
             ]
+            .height(Length::Fill)
             .spacing(6)
             .into()
         }
@@ -150,11 +185,14 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
                 text_editor(&app.body_editor)
                     .on_action(Message::BodyEdited)
                     .height(Length::Fill);
-            column![text("Body"), body_editor].spacing(6).into()
+            column![text("Body"), body_editor]
+                .height(Length::Fill)
+                .spacing(6)
+                .into()
         }
     };
 
-    container(column![graphql_panel].padding(8).spacing(6))
+    container(column![graphql_panel].padding(8).spacing(6).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
