@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -26,7 +26,10 @@ pub struct HeaderRow {
 pub struct Zagel {
     pub(super) collections: Vec<Collection>,
     pub(super) http_files: HashMap<PathBuf, HttpFile>,
+    pub(super) http_file_order: Vec<PathBuf>,
     pub(super) selection: Option<RequestId>,
+    pub(super) editing: bool,
+    pub(super) edit_selection: HashSet<super::EditTarget>,
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
@@ -91,7 +94,10 @@ impl Zagel {
         let mut app = Self {
             collections: Vec::new(),
             http_files: HashMap::new(),
+            http_file_order: Vec::new(),
             selection: None,
+            editing: false,
+            edit_selection: HashSet::new(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),

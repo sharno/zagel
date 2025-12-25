@@ -8,4 +8,4 @@ mod update;
 mod view;
 
 pub use lifecycle::{HeaderRow, Zagel, run};
-pub use messages::Message;
+pub use messages::{CollectionRef, EditTarget, Message};

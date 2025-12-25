@@ -1,19 +1,44 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use iced::widget::{Space, button, column, row, scrollable, text};
 use iced::{Element, Length};
 
-use super::super::Message;
+use super::super::{CollectionRef, EditTarget, Message};
 use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 14;
 
+#[derive(Clone, Copy)]
+pub struct SidebarContext<'a> {
+    pub collections: &'a [Collection],
+    pub http_files: &'a HashMap<PathBuf, HttpFile>,
+    pub http_file_order: &'a [PathBuf],
+    pub selection: Option<&'a RequestId>,
+    pub collapsed: &'a BTreeSet<String>,
+    pub http_root: &'a Path,
+    pub editing: bool,
+    pub edit_selection: &'a HashSet<EditTarget>,
+}
+
+struct RenderContext<'a> {
+    selection: Option<&'a RequestId>,
+    collapsed: &'a BTreeSet<String>,
+    editing: bool,
+    edit_selection: &'a HashSet<EditTarget>,
+}
+
 #[derive(Default)]
 struct TreeNode {
-    children: BTreeMap<String, Self>,
+    children: Vec<TreeChild>,
     requests: Vec<RequestItem>,
     file_path: Option<PathBuf>,
+    collection_index: Option<usize>,
+}
+
+struct TreeChild {
+    name: String,
+    node: TreeNode,
 }
 
 struct RequestItem {
@@ -21,24 +46,27 @@ struct RequestItem {
     draft: RequestDraft,
 }
 
-pub fn sidebar<'a>(
-    collections: &'a [Collection],
-    http_files: &'a HashMap<PathBuf, HttpFile>,
-    selection: Option<&RequestId>,
-    collapsed: &BTreeSet<String>,
-    http_root: &Path,
-) -> Element<'a, Message> {
-    let mut items = column![
-        row![
-            text("Requests").size(18),
-            button("Add").on_press(Message::AddRequest)
-        ]
-        .spacing(8)
-    ];
+pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
+    let mut header = row![text("Requests").size(18), button("Add").on_press(Message::AddRequest)]
+        .spacing(8);
+    if ctx.editing {
+        let delete_button = if ctx.edit_selection.is_empty() {
+            button("Delete")
+        } else {
+            button("Delete").on_press(Message::DeleteSelected)
+        };
+        header = header
+            .push(delete_button)
+            .push(button("Done").on_press(Message::ToggleEditMode));
+    } else {
+        header = header.push(button("Edit").on_press(Message::ToggleEditMode));
+    }
+
+    let mut items = column![header];
 
     let mut tree = TreeNode::default();
 
-    for (idx, collection) in collections.iter().enumerate() {
+    for (idx, collection) in ctx.collections.iter().enumerate() {
         let segments: Vec<&str> = collection
             .name
             .split('/')
@@ -48,6 +76,7 @@ pub fn sidebar<'a>(
             &mut tree,
             &segments,
             None,
+            Some(idx),
             collection
                 .requests
                 .iter()
@@ -62,8 +91,11 @@ pub fn sidebar<'a>(
         );
     }
 
-    for file in http_files.values() {
-        let rel_path = file.path.strip_prefix(http_root).unwrap_or(&file.path);
+    for path in ctx.http_file_order {
+        let Some(file) = ctx.http_files.get(path) else {
+            continue;
+        };
+        let rel_path = file.path.strip_prefix(ctx.http_root).unwrap_or(&file.path);
         let mut segments: Vec<String> = rel_path
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
@@ -77,6 +109,7 @@ pub fn sidebar<'a>(
             &mut tree,
             &segments.iter().map(String::as_str).collect::<Vec<_>>(),
             Some(&file.path),
+            None,
             file.requests
                 .iter()
                 .enumerate()
@@ -91,7 +124,13 @@ pub fn sidebar<'a>(
     }
 
     items = items.push(text("Collections").size(14));
-    items = render_tree(items, &tree, "", 0, selection, collapsed);
+    let render_ctx = RenderContext {
+        selection: ctx.selection,
+        collapsed: ctx.collapsed,
+        editing: ctx.editing,
+        edit_selection: ctx.edit_selection,
+    };
+    items = render_tree(items, &tree, "", 0, &render_ctx);
 
     scrollable(items.spacing(6).padding(8))
         .width(Length::Fill)
@@ -102,6 +141,7 @@ fn insert_collection(
     root: &mut TreeNode,
     segments: &[&str],
     file_path: Option<&PathBuf>,
+    collection_index: Option<usize>,
     requests: impl Iterator<Item = RequestItem>,
 ) {
     if segments.is_empty() {
@@ -110,16 +150,28 @@ fn insert_collection(
 
     let mut node = root;
     for segment in &segments[..segments.len() - 1] {
-        node = node.children.entry((*segment).to_string()).or_default();
+        node = child_mut(node, segment);
     }
-    let leaf = node
-        .children
-        .entry(segments[segments.len() - 1].to_string())
-        .or_default();
+    let leaf = child_mut(node, segments[segments.len() - 1]);
     if leaf.file_path.is_none() {
         leaf.file_path = file_path.cloned();
     }
+    if leaf.collection_index.is_none() {
+        leaf.collection_index = collection_index;
+    }
     leaf.requests.extend(requests);
+}
+
+fn child_mut<'a>(node: &'a mut TreeNode, name: &str) -> &'a mut TreeNode {
+    if let Some(pos) = node.children.iter().position(|child| child.name == name) {
+        return &mut node.children[pos].node;
+    }
+    node.children.push(TreeChild {
+        name: name.to_string(),
+        node: TreeNode::default(),
+    });
+    let idx = node.children.len() - 1;
+    &mut node.children[idx].node
 }
 
 fn render_tree<'a>(
@@ -127,23 +179,15 @@ fn render_tree<'a>(
     node: &TreeNode,
     path: &str,
     depth: usize,
-    selection: Option<&RequestId>,
-    collapsed: &BTreeSet<String>,
+    ctx: &RenderContext<'a>,
 ) -> iced::widget::Column<'a, Message> {
-    let mut children: Vec<(String, &TreeNode)> = node
-        .children
-        .iter()
-        .map(|(name, child)| (name.clone(), child))
-        .collect();
-    children.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (name, child) in children {
+    for child in &node.children {
         let full_path = if path.is_empty() {
-            name.clone()
+            child.name.clone()
         } else {
-            format!("{path}/{name}")
+            format!("{path}/{}", child.name)
         };
-        let is_collapsed = collapsed.contains(&full_path);
+        let is_collapsed = ctx.collapsed.contains(&full_path);
         let toggle_label = if is_collapsed { "▶" } else { "▼" };
         let toggle = button(text(toggle_label))
             .style(button::secondary)
@@ -152,8 +196,31 @@ fn render_tree<'a>(
 
         let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
 
-        if let Some(file_path) = &child.file_path {
-            let is_selected = selection
+        let collection_ref = child
+            .node
+            .file_path
+            .as_ref()
+            .map(|file_path| CollectionRef::HttpFile(file_path.clone()))
+            .or_else(|| {
+                child
+                    .node
+                    .collection_index
+                    .map(CollectionRef::CollectionIndex)
+            });
+
+        if ctx.editing && let Some(collection_ref) = collection_ref.clone() {
+            let target = EditTarget::Collection(collection_ref.clone());
+            let selected = ctx.edit_selection.contains(&target);
+            let label = if selected { "[x]" } else { "[ ]" };
+            row_widgets = row_widgets
+                .push(button(text(label)).on_press(Message::ToggleEditSelection(target)))
+                .push(button(text("^")).on_press(Message::MoveCollectionUp(collection_ref.clone())))
+                .push(button(text("v")).on_press(Message::MoveCollectionDown(collection_ref)));
+        }
+
+        if let Some(file_path) = &child.node.file_path {
+            let is_selected = ctx
+                .selection
                 .and_then(|id| match id {
                     RequestId::HttpFile { path, .. } => Some(path),
                     RequestId::Collection { .. } => None,
@@ -165,7 +232,7 @@ fn render_tree<'a>(
                 index: 0,
             };
 
-            let select_button = button(text(name).size(14))
+            let select_button = button(text(child.name.clone()).size(14))
                 .style(if is_selected {
                     button::primary
                 } else {
@@ -175,33 +242,41 @@ fn render_tree<'a>(
                 .on_press(Message::Select(select_id));
             row_widgets = row_widgets.push(select_button);
         } else {
-            row_widgets = row_widgets.push(text(name).size(14));
+            row_widgets = row_widgets.push(text(child.name.clone()).size(14));
         }
 
         column = column.push(row_widgets.spacing(6));
 
         if !is_collapsed {
-            column = render_tree(column, child, &full_path, depth + 1, selection, collapsed);
+            column = render_tree(column, &child.node, &full_path, depth + 1, ctx);
         }
     }
 
     if !node.requests.is_empty() {
         for item in &node.requests {
-            let is_selected = selection.is_some_and(|s| *s == item.id);
+            let is_selected = ctx.selection.is_some_and(|s| *s == item.id);
             let label = if is_selected {
                 format!("▶ {} • {}", item.draft.method, item.draft.title)
             } else {
                 format!("{} • {}", item.draft.method, item.draft.title)
             };
-            column = column.push(
-                row![
-                    Space::new().width(Length::Fixed(indent_px(depth + 1))),
-                    button(text(label))
-                        .width(Length::Fill)
-                        .on_press(Message::Select(item.id.clone())),
-                ]
-                .spacing(6),
+            let mut row_widgets =
+                row![Space::new().width(Length::Fixed(indent_px(depth + 1)))];
+            if ctx.editing {
+                let target = EditTarget::Request(item.id.clone());
+                let selected = ctx.edit_selection.contains(&target);
+                let select_label = if selected { "[x]" } else { "[ ]" };
+                row_widgets = row_widgets
+                    .push(button(text(select_label)).on_press(Message::ToggleEditSelection(target)))
+                    .push(button(text("^")).on_press(Message::MoveRequestUp(item.id.clone())))
+                    .push(button(text("v")).on_press(Message::MoveRequestDown(item.id.clone())));
+            }
+            row_widgets = row_widgets.push(
+                button(text(label))
+                    .width(Length::Fill)
+                    .on_press(Message::Select(item.id.clone())),
             );
+            column = column.push(row_widgets.spacing(6));
         }
     }
 

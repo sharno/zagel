@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 
 use iced::widget::pane_grid;
@@ -5,16 +7,154 @@ use iced::{Task, clipboard};
 
 use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
 use crate::net::send_request;
-use crate::parser::persist_request;
+use crate::parser::{persist_request, write_http_file};
 
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::{status_with_missing, with_default_environment};
-use super::{HeaderRow, Message, Zagel};
+use super::{CollectionRef, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
 
 fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
+}
+
+fn remap_edit_selection(
+    edit_selection: &mut HashSet<EditTarget>,
+    mut map: impl FnMut(EditTarget) -> EditTarget,
+) {
+    let mut next = HashSet::with_capacity(edit_selection.len());
+    for item in edit_selection.drain() {
+        next.insert(map(item));
+    }
+    *edit_selection = next;
+}
+
+const fn swap_collection_indices_in_selection(
+    selection: &mut Option<RequestId>,
+    a: usize,
+    b: usize,
+) {
+    if let Some(RequestId::Collection { collection, .. }) = selection.as_mut() {
+        if *collection == a {
+            *collection = b;
+        } else if *collection == b {
+            *collection = a;
+        }
+    }
+}
+
+fn swap_collection_indices_in_edit_selection(
+    edit_selection: &mut HashSet<EditTarget>,
+    a: usize,
+    b: usize,
+) {
+    remap_edit_selection(edit_selection, |item| match item {
+        EditTarget::Collection(CollectionRef::CollectionIndex(idx)) => {
+            if idx == a {
+                EditTarget::Collection(CollectionRef::CollectionIndex(b))
+            } else if idx == b {
+                EditTarget::Collection(CollectionRef::CollectionIndex(a))
+            } else {
+                EditTarget::Collection(CollectionRef::CollectionIndex(idx))
+            }
+        }
+        EditTarget::Request(RequestId::Collection { collection, index }) => {
+            if collection == a {
+                EditTarget::Request(RequestId::Collection { collection: b, index })
+            } else if collection == b {
+                EditTarget::Request(RequestId::Collection { collection: a, index })
+            } else {
+                EditTarget::Request(RequestId::Collection { collection, index })
+            }
+        }
+        other => other,
+    });
+}
+
+const fn swap_request_indices_in_selection_collection(
+    selection: &mut Option<RequestId>,
+    collection: usize,
+    a: usize,
+    b: usize,
+) {
+    if let Some(RequestId::Collection {
+        collection: sel_collection,
+        index,
+    }) = selection.as_mut()
+        && *sel_collection == collection
+    {
+        if *index == a {
+            *index = b;
+        } else if *index == b {
+            *index = a;
+        }
+    }
+}
+
+fn swap_request_indices_in_selection_http(
+    selection: &mut Option<RequestId>,
+    path: &PathBuf,
+    a: usize,
+    b: usize,
+) {
+    if let Some(RequestId::HttpFile { path: sel_path, index }) = selection.as_mut()
+        && sel_path == path
+    {
+        if *index == a {
+            *index = b;
+        } else if *index == b {
+            *index = a;
+        }
+    }
+}
+
+fn swap_request_indices_in_edit_selection_collection(
+    edit_selection: &mut HashSet<EditTarget>,
+    collection: usize,
+    a: usize,
+    b: usize,
+) {
+    remap_edit_selection(edit_selection, |item| match item {
+        EditTarget::Request(RequestId::Collection { collection: c, index }) => {
+            if c == collection {
+                if index == a {
+                    EditTarget::Request(RequestId::Collection { collection: c, index: b })
+                } else if index == b {
+                    EditTarget::Request(RequestId::Collection { collection: c, index: a })
+                } else {
+                    EditTarget::Request(RequestId::Collection { collection: c, index })
+                }
+            } else {
+                EditTarget::Request(RequestId::Collection { collection: c, index })
+            }
+        }
+        other => other,
+    });
+}
+
+fn swap_request_indices_in_edit_selection_http(
+    edit_selection: &mut HashSet<EditTarget>,
+    path: &PathBuf,
+    a: usize,
+    b: usize,
+) {
+    remap_edit_selection(edit_selection, |item| match item {
+        EditTarget::Request(RequestId::HttpFile { path: p, index }) => {
+            if p == *path {
+                if index == a {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index: b })
+                } else if index == b {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index: a })
+                } else {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index })
+                }
+            } else {
+                EditTarget::Request(RequestId::HttpFile { path: p, index })
+            }
+        }
+        other => other,
+    });
 }
 
 #[allow(clippy::too_many_lines)]
@@ -24,6 +164,16 @@ impl Zagel {
             Message::Tick => self.rescan_files(),
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
+                self.http_file_order
+                    .retain(|path| self.http_files.contains_key(path));
+                let mut new_paths: Vec<PathBuf> = self
+                    .http_files
+                    .keys()
+                    .filter(|path| !self.http_file_order.contains(path))
+                    .cloned()
+                    .collect();
+                new_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+                self.http_file_order.extend(new_paths);
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
@@ -41,6 +191,331 @@ impl Zagel {
             Message::ToggleCollection(path) => {
                 if !self.collapsed_collections.remove(&path) {
                     self.collapsed_collections.insert(path);
+                }
+                Task::none()
+            }
+            Message::ToggleEditMode => {
+                self.editing = !self.editing;
+                if !self.editing {
+                    self.edit_selection.clear();
+                }
+                Task::none()
+            }
+            Message::ToggleEditSelection(target) => {
+                if !self.edit_selection.remove(&target) {
+                    self.edit_selection.insert(target);
+                }
+                Task::none()
+            }
+            Message::DeleteSelected => {
+                if self.edit_selection.is_empty() {
+                    return Task::none();
+                }
+
+                let mut remove_collection_indices = Vec::new();
+                let mut remove_file_paths = Vec::new();
+                let mut request_ids = Vec::new();
+
+                for target in &self.edit_selection {
+                    match target {
+                        EditTarget::Collection(CollectionRef::CollectionIndex(idx)) => {
+                            remove_collection_indices.push(*idx);
+                        }
+                        EditTarget::Collection(CollectionRef::HttpFile(path)) => {
+                            remove_file_paths.push(path.clone());
+                        }
+                        EditTarget::Request(id) => request_ids.push(id.clone()),
+                    }
+                }
+
+                remove_collection_indices.sort_unstable();
+                remove_collection_indices.dedup();
+                remove_file_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+                remove_file_paths.dedup();
+
+                let remove_collections_set: HashSet<usize> =
+                    remove_collection_indices.iter().copied().collect();
+                let remove_files_set: HashSet<PathBuf> =
+                    remove_file_paths.iter().cloned().collect();
+
+                let mut collection_request_removals = std::collections::HashMap::new();
+                let mut file_request_removals = std::collections::HashMap::new();
+
+                for id in request_ids {
+                    match id {
+                        RequestId::Collection { collection, index } => {
+                            if remove_collections_set.contains(&collection) {
+                                continue;
+                            }
+                            collection_request_removals
+                                .entry(collection)
+                                .or_insert_with(Vec::new)
+                                .push(index);
+                        }
+                        RequestId::HttpFile { path, index } => {
+                            if remove_files_set.contains(&path) {
+                                continue;
+                            }
+                            file_request_removals
+                                .entry(path)
+                                .or_insert_with(Vec::new)
+                                .push(index);
+                        }
+                    }
+                }
+
+                let mut errors = Vec::new();
+
+                for (collection, mut indices) in collection_request_removals {
+                    if let Some(col) = self.collections.get_mut(collection) {
+                        indices.sort_unstable();
+                        indices.dedup();
+                        for idx in indices.into_iter().rev() {
+                            if idx < col.requests.len() {
+                                col.requests.remove(idx);
+                            }
+                        }
+                    }
+                }
+
+                for (path, mut indices) in file_request_removals {
+                    if let Some(file) = self.http_files.get_mut(&path) {
+                        indices.sort_unstable();
+                        indices.dedup();
+                        for idx in indices.into_iter().rev() {
+                            if idx < file.requests.len() {
+                                file.requests.remove(idx);
+                            }
+                        }
+                        if let Err(err) = write_http_file(&file.path, &file.requests) {
+                            errors.push(format!(
+                                "Failed to update {}: {}",
+                                file.path.display(),
+                                err
+                            ));
+                        }
+                    }
+                }
+
+                for idx in remove_collection_indices.into_iter().rev() {
+                    if idx < self.collections.len() {
+                        self.collections.remove(idx);
+                    }
+                }
+
+                for path in &remove_file_paths {
+                    match fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(_err) if !path.exists() => {}
+                        Err(err) => errors.push(format!(
+                            "Failed to delete {}: {}",
+                            path.display(),
+                            err
+                        )),
+                    }
+                    self.http_files.remove(path);
+                }
+                if !remove_file_paths.is_empty() {
+                    self.http_file_order
+                        .retain(|path| !remove_files_set.contains(path));
+                }
+
+                self.edit_selection.clear();
+                if errors.is_empty() {
+                    self.update_status_with_missing("Deleted selection");
+                } else {
+                    self.update_status_with_missing(&errors.join("; "));
+                }
+
+                if let Some(selected) = self.selection.clone() {
+                    let still_valid = match selected {
+                        RequestId::Collection { collection, index } => self
+                            .collections
+                            .get(collection)
+                            .is_some_and(|col| index < col.requests.len()),
+                        RequestId::HttpFile { path, index } => self
+                            .http_files
+                            .get(&path)
+                            .is_some_and(|file| index < file.requests.len()),
+                    };
+                    if !still_valid {
+                        self.selection = None;
+                    }
+                }
+
+                Task::none()
+            }
+            Message::MoveCollectionUp(collection_ref) => {
+                match collection_ref {
+                    CollectionRef::CollectionIndex(idx) => {
+                        if idx > 0 && idx < self.collections.len() {
+                            self.collections.swap(idx, idx - 1);
+                            swap_collection_indices_in_selection(&mut self.selection, idx, idx - 1);
+                            swap_collection_indices_in_edit_selection(
+                                &mut self.edit_selection,
+                                idx,
+                                idx - 1,
+                            );
+                        }
+                    }
+                    CollectionRef::HttpFile(path) => {
+                        if let Some(pos) =
+                            self.http_file_order.iter().position(|p| p == &path)
+                            && pos > 0
+                        {
+                            self.http_file_order.swap(pos, pos - 1);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::MoveCollectionDown(collection_ref) => {
+                match collection_ref {
+                    CollectionRef::CollectionIndex(idx) => {
+                        if idx + 1 < self.collections.len() {
+                            self.collections.swap(idx, idx + 1);
+                            swap_collection_indices_in_selection(&mut self.selection, idx, idx + 1);
+                            swap_collection_indices_in_edit_selection(
+                                &mut self.edit_selection,
+                                idx,
+                                idx + 1,
+                            );
+                        }
+                    }
+                    CollectionRef::HttpFile(path) => {
+                        if let Some(pos) =
+                            self.http_file_order.iter().position(|p| p == &path)
+                            && pos + 1 < self.http_file_order.len()
+                        {
+                            self.http_file_order.swap(pos, pos + 1);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::MoveRequestUp(id) => {
+                match &id {
+                    RequestId::Collection { collection, index } => {
+                        if *index == 0 {
+                            return Task::none();
+                        }
+                        if let Some(col) = self.collections.get_mut(*collection)
+                            && *index < col.requests.len()
+                        {
+                            let new_index = *index - 1;
+                            col.requests.swap(*index, new_index);
+                            swap_request_indices_in_selection_collection(
+                                &mut self.selection,
+                                *collection,
+                                *index,
+                                new_index,
+                            );
+                            swap_request_indices_in_edit_selection_collection(
+                                &mut self.edit_selection,
+                                *collection,
+                                *index,
+                                new_index,
+                            );
+                        }
+                    }
+                    RequestId::HttpFile { path, index } => {
+                        if *index == 0 {
+                            return Task::none();
+                        }
+                        let mut new_index = None;
+                        let mut status_error = None;
+                        if let Some(file) = self.http_files.get_mut(path)
+                            && *index < file.requests.len()
+                        {
+                            let updated_index = *index - 1;
+                            file.requests.swap(*index, updated_index);
+                            if let Err(err) = write_http_file(&file.path, &file.requests) {
+                                status_error = Some(format!(
+                                    "Failed to reorder {}: {}",
+                                    file.path.display(),
+                                    err
+                                ));
+                            }
+                            new_index = Some(updated_index);
+                        }
+                        if let Some(updated_index) = new_index {
+                            swap_request_indices_in_selection_http(
+                                &mut self.selection,
+                                path,
+                                *index,
+                                updated_index,
+                            );
+                            swap_request_indices_in_edit_selection_http(
+                                &mut self.edit_selection,
+                                path,
+                                *index,
+                                updated_index,
+                            );
+                        }
+                        if let Some(message) = status_error {
+                            self.update_status_with_missing(&message);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::MoveRequestDown(id) => {
+                match &id {
+                    RequestId::Collection { collection, index } => {
+                        if let Some(col) = self.collections.get_mut(*collection)
+                            && *index + 1 < col.requests.len()
+                        {
+                            let new_index = *index + 1;
+                            col.requests.swap(*index, new_index);
+                            swap_request_indices_in_selection_collection(
+                                &mut self.selection,
+                                *collection,
+                                *index,
+                                new_index,
+                            );
+                            swap_request_indices_in_edit_selection_collection(
+                                &mut self.edit_selection,
+                                *collection,
+                                *index,
+                                new_index,
+                            );
+                        }
+                    }
+                    RequestId::HttpFile { path, index } => {
+                        let mut new_index = None;
+                        let mut status_error = None;
+                        if let Some(file) = self.http_files.get_mut(path)
+                            && *index + 1 < file.requests.len()
+                        {
+                            let updated_index = *index + 1;
+                            file.requests.swap(*index, updated_index);
+                            if let Err(err) = write_http_file(&file.path, &file.requests) {
+                                status_error = Some(format!(
+                                    "Failed to reorder {}: {}",
+                                    file.path.display(),
+                                    err
+                                ));
+                            }
+                            new_index = Some(updated_index);
+                        }
+                        if let Some(updated_index) = new_index {
+                            swap_request_indices_in_selection_http(
+                                &mut self.selection,
+                                path,
+                                *index,
+                                updated_index,
+                            );
+                            swap_request_indices_in_edit_selection_http(
+                                &mut self.edit_selection,
+                                path,
+                                *index,
+                                updated_index,
+                            );
+                        }
+                        if let Some(message) = status_error {
+                            self.update_status_with_missing(&message);
+                        }
+                    }
                 }
                 Task::none()
             }
