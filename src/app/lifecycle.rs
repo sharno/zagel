@@ -16,11 +16,19 @@ use super::{Message, hotkeys, view};
 
 const FILE_SCAN_MAX_DEPTH: usize = 6;
 const FILE_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
+const MAX_UNDO_HISTORY: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct HeaderRow {
     pub name: String,
     pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UndoableState {
+    pub draft: RequestDraft,
+    pub body_text: String,
+    pub header_rows: Vec<HeaderRow>,
 }
 
 pub struct Zagel {
@@ -49,6 +57,8 @@ pub struct Zagel {
     pub(super) workspace_panes: pane_grid::State<crate::app::view::WorkspacePane>,
     pub(super) builder_panes: pane_grid::State<crate::app::view::BuilderPane>,
     pub(super) collapsed_collections: BTreeSet<String>,
+    pub(super) undo_stack: Vec<UndoableState>,
+    pub(super) redo_stack: Vec<UndoableState>,
 }
 
 impl Zagel {
@@ -114,6 +124,8 @@ impl Zagel {
             workspace_panes,
             builder_panes,
             collapsed_collections: BTreeSet::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         };
 
         let task = app.rescan_files();
@@ -252,6 +264,28 @@ impl Zagel {
         };
         let extra_refs: Vec<&str> = extras.iter().map(std::string::String::as_str).collect();
         self.status_line = status_with_missing(base, &self.draft, env, &extra_refs);
+    }
+
+    pub(super) fn save_undo_state(&mut self) {
+        let state = UndoableState {
+            draft: self.draft.clone(),
+            body_text: self.body_editor.text(),
+            header_rows: self.header_rows.clone(),
+        };
+        self.undo_stack.push(state);
+
+        if self.undo_stack.len() > MAX_UNDO_HISTORY {
+            self.undo_stack.remove(0);
+        }
+
+        self.redo_stack.clear();
+    }
+
+    pub(super) fn restore_state(&mut self, state: &UndoableState) {
+        self.draft = state.draft.clone();
+        self.body_editor = iced::widget::text_editor::Content::with_text(&state.body_text);
+        self.header_rows.clone_from(&state.header_rows);
+        self.update_status_with_missing("Ready");
     }
 }
 

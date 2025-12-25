@@ -39,4 +39,6 @@ pub enum Message {
     BuilderPaneResized(pane_grid::ResizeEvent),
     ToggleCollection(String),
     AddRequest,
+    Undo,
+    Redo,
 }
