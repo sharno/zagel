@@ -73,20 +73,20 @@ impl Zagel {
         let (mut workspace_panes, builder) =
             pane_grid::State::new(super::view::WorkspacePane::Builder);
         if let Some((_, split)) = workspace_panes.split(
-            pane_grid::Axis::Vertical,
+            pane_grid::Axis::Horizontal,
             builder,
             super::view::WorkspacePane::Response,
         ) {
-            workspace_panes.resize(split, 0.6);
+            workspace_panes.resize(split, 0.62);
         }
 
         let (mut builder_panes, form) = pane_grid::State::new(super::view::BuilderPane::Form);
         if let Some((_, split)) = builder_panes.split(
-            pane_grid::Axis::Horizontal,
+            pane_grid::Axis::Vertical,
             form,
             super::view::BuilderPane::Body,
         ) {
-            builder_panes.resize(split, 0.55);
+            builder_panes.resize(split, 0.45);
         }
 
         let mut app = Self {
@@ -131,8 +131,8 @@ impl Zagel {
         ])
     }
 
-    pub(super) const fn theme(_: &Self) -> Theme {
-        Theme::Nord
+    pub(super) const fn theme(state: &Self) -> Theme {
+        state.state.theme.iced_theme()
     }
 
     pub(super) fn rescan_files(&self) -> Task<Message> {
