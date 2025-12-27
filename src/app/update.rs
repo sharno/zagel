@@ -135,6 +135,10 @@ impl Zagel {
                 self.response_tab = tab;
                 Task::none()
             }
+            Message::ToggleShortcutsHelp => {
+                self.show_shortcuts = !self.show_shortcuts;
+                Task::none()
+            }
             Message::CopyResponseBody => {
                 clipboard::write(self.response_viewer.text()).map(|()| Message::CopyComplete)
             }
