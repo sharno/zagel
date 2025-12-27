@@ -131,8 +131,8 @@ impl Zagel {
         ])
     }
 
-    pub(super) const fn theme(_: &Self) -> Theme {
-        Theme::CatppuccinMocha
+    pub(super) const fn theme(state: &Self) -> Theme {
+        state.state.theme.iced_theme()
     }
 
     pub(super) fn rescan_files(&self) -> Task<Message> {

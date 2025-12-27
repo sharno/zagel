@@ -3,10 +3,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::theme::ThemeChoice;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppState {
     pub active_environment: Option<String>,
     pub http_root: Option<PathBuf>,
+    #[serde(default)]
+    pub theme: ThemeChoice,
 }
 
 impl AppState {

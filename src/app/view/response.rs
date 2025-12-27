@@ -73,6 +73,7 @@ pub fn response_panel<'a>(
     content: &'a text_editor::Content,
     display: ResponseDisplay,
     tab: ResponseTab,
+    highlight_theme: HighlightTheme,
 ) -> Element<'a, Message> {
     response.map_or_else(
         || text("No response yet").into(),
@@ -104,7 +105,7 @@ pub fn response_panel<'a>(
             let syntax = response_syntax(resp);
             let body_editor = text_editor(content)
                 .height(Length::Fill)
-                .highlight(syntax, HighlightTheme::Base16Mocha)
+                .highlight(syntax, highlight_theme)
                 .wrapping(Wrapping::None);
 
             let body_section: Element<'_, Message> = column![

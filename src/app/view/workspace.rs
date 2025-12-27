@@ -3,7 +3,7 @@ use iced::widget::{
     button, column, container, pick_list, row, scrollable, stack, text, text_editor,
     text_input,
 };
-use iced::{alignment, border, Alignment, Color, Element, Length, Theme};
+use iced::{alignment, Alignment, Element, Length, Theme};
 
 use super::super::{Message, Zagel, headers};
 use super::section;
@@ -11,6 +11,7 @@ use super::auth::auth_editor;
 use super::response::{response_panel, response_tab_toggle, response_view_toggle};
 use crate::app::options::RequestMode;
 use crate::model::{Method, RequestId};
+use crate::theme;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WorkspacePane {
@@ -242,6 +243,7 @@ fn response(app: &Zagel) -> Element<'_, Message> {
         &app.response_viewer,
         app.response_display,
         app.response_tab,
+        app.state.theme.highlight_theme(),
     );
 
     let response_section = section(
@@ -293,14 +295,6 @@ fn shortcuts_panel() -> Element<'static, Message> {
 
     container(column![header, shortcuts].spacing(6))
         .padding(10)
-        .style(|_| {
-            iced::widget::container::Style::default()
-                .background(Color::from_rgb8(24, 25, 28))
-                .border(
-                    border::rounded(8.0)
-                        .width(1.0)
-                        .color(Color::from_rgb8(70, 73, 80)),
-                )
-        })
+        .style(theme::overlay_container_style)
         .into()
 }
