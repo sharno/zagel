@@ -4,7 +4,7 @@ mod sidebar;
 mod workspace;
 
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{container, text};
+use iced::widget::{column, container, row, rule, space, text};
 use iced::{Element, Length};
 
 use super::{Message, Zagel};
@@ -40,5 +40,27 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
     .spacing(12.0)
     .on_resize(6, Message::PaneResized);
 
-    container(grid).into()
+    column![
+        container(grid).height(Length::Fill),
+        rule::horizontal(1),
+        status_bar(app_ref)
+    ]
+    .into()
+}
+
+fn status_bar(app: &Zagel) -> Element<'_, Message> {
+    let hint = if app.show_shortcuts {
+        "Press ? to hide shortcuts"
+    } else {
+        "Press ? for shortcuts"
+    };
+
+    let content = row![
+        text(hint).size(12),
+        space().width(Length::Fill),
+        text(format!("Status: {}", app.status_line)).size(12),
+    ]
+    .spacing(8);
+
+    container(content).padding([6, 12]).into()
 }
