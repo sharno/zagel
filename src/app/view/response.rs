@@ -75,7 +75,7 @@ pub fn response_panel<'a>(
     tab: ResponseTab,
 ) -> Element<'a, Message> {
     response.map_or_else(
-        || container(text("No response yet")).padding(6).into(),
+        || text("No response yet").into(),
         |resp| {
             let header = match (resp.status, resp.duration) {
                 (Some(status), Some(duration)) => {
@@ -103,7 +103,7 @@ pub fn response_panel<'a>(
             let body_is_pretty = pretty_json(&body_text).is_some();
             let syntax = response_syntax(resp);
             let body_editor = text_editor(content)
-                .height(Length::Fixed(260.0))
+                .height(Length::Fill)
                 .highlight(syntax, HighlightTheme::SolarizedDark)
                 .wrapping(Wrapping::None);
 
@@ -132,9 +132,14 @@ pub fn response_panel<'a>(
                 ResponseTab::Headers => headers_section,
             };
 
-            container(column![text(header).size(16), rule::horizontal(1), tab_view].spacing(6))
-                .padding(6)
-                .into()
+            column![
+                text(header).size(16),
+                rule::horizontal(1),
+                container(tab_view).height(Length::Fill),
+            ]
+            .spacing(6)
+            .height(Length::Fill)
+            .into()
         },
     )
 }

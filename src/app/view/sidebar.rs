@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
-use iced::widget::{Space, button, column, row, scrollable, text};
-use iced::{Element, Length};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::{Alignment, Element, Length};
 
 use super::super::Message;
+use super::section;
 use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 10;
@@ -28,13 +29,12 @@ pub fn sidebar<'a>(
     collapsed: &BTreeSet<String>,
     http_root: &Path,
 ) -> Element<'a, Message> {
-    let mut items = column![
-        row![
-            text("Requests").size(18),
-            button("Add").on_press(Message::AddRequest)
-        ]
-        .spacing(6)
-    ];
+    let header = row![
+        text("Requests").size(20),
+        button("Add").on_press(Message::AddRequest)
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
 
     let mut tree = TreeNode::default();
 
@@ -90,11 +90,18 @@ pub fn sidebar<'a>(
         );
     }
 
-    items = items.push(text("Collections").size(14));
-    items = render_tree(items, &tree, "", 0, selection, collapsed);
+    let list = render_tree(column![], &tree, "", 0, selection, collapsed)
+        .spacing(4);
+    let collections_section = section("Collections", list.into());
 
-    scrollable(items.spacing(4).padding(6))
+    let list = scrollable(column![header, collections_section].spacing(10))
         .width(Length::Fill)
+        .height(Length::Fill);
+
+    container(list)
+        .padding(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
 
@@ -197,6 +204,11 @@ fn render_tree<'a>(
                 row![
                     Space::new().width(Length::Fixed(indent_px(depth + 1))),
                     button(text(label))
+                        .style(if is_selected {
+                            button::primary
+                        } else {
+                            button::secondary
+                        })
                         .width(Length::Fill)
                         .on_press(Message::Select(item.id.clone())),
                 ]

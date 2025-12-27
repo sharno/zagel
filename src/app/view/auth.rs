@@ -24,28 +24,34 @@ pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
             .width(Length::Fill)
             .into(),
         AuthKind::ApiKey => column![
-            text_input("Header name", &auth.api_key_name).on_input(|val| {
-                let mut new = auth.clone();
-                new.api_key_name = val;
-                Message::AuthChanged(new)
-            }),
+            text_input("Header name", &auth.api_key_name)
+                .on_input(|val| {
+                    let mut new = auth.clone();
+                    new.api_key_name = val;
+                    Message::AuthChanged(new)
+                })
+                .padding(4)
+                .width(Length::Fill),
             text_input("Header value", &auth.api_key_value)
                 .on_input(|val| {
                     let mut new = auth.clone();
                     new.api_key_value = val;
                     Message::AuthChanged(new)
                 })
-                .padding(6)
+                .padding(4)
                 .width(Length::Fill),
         ]
         .spacing(4)
         .into(),
         AuthKind::Basic => column![
-            text_input("Username", &auth.basic_username).on_input(|val| {
-                let mut new = auth.clone();
-                new.basic_username = val;
-                Message::AuthChanged(new)
-            }),
+            text_input("Username", &auth.basic_username)
+                .on_input(|val| {
+                    let mut new = auth.clone();
+                    new.basic_username = val;
+                    Message::AuthChanged(new)
+                })
+                .padding(4)
+                .width(Length::Fill),
             text_input("Password", &auth.basic_password)
                 .on_input(|val| {
                     let mut new = auth.clone();

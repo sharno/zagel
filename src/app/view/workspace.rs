@@ -1,10 +1,11 @@
 use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, text, text_editor, text_input,
+    button, column, container, pick_list, row, scrollable, text, text_editor, text_input,
 };
 use iced::{Alignment, Element, Length, Theme};
 
 use super::super::{Message, Zagel, headers};
+use super::section;
 use super::auth::auth_editor;
 use super::response::{response_panel, response_tab_toggle, response_view_toggle};
 use crate::app::options::RequestMode;
@@ -25,8 +26,8 @@ pub enum BuilderPane {
 const ENV_PICK_MAX_WIDTH: f32 = 180.0;
 const MODE_PICK_MAX_WIDTH: f32 = 150.0;
 const METHOD_PICK_MAX_WIDTH: f32 = 120.0;
-const ACTION_WIDTH: f32 = 76.0;
-const LABEL_WIDTH: f32 = 76.0;
+const ACTION_WIDTH: f32 = 84.0;
+const LABEL_WIDTH: f32 = 80.0;
 
 pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     let workspace_grid = PaneGrid::new(&app.workspace_panes, move |_, pane, _| match pane {
@@ -38,10 +39,17 @@ pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     .spacing(8.0)
     .on_resize(6, Message::WorkspacePaneResized);
 
-    container(workspace_grid)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    let header = text("Request Builder").size(20);
+
+    container(
+        column![header, workspace_grid]
+            .spacing(8)
+            .height(Length::Fill),
+    )
+    .padding(8)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 fn builder(app: &Zagel) -> Element<'_, Message> {
@@ -126,41 +134,58 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 
     let auth_view = auth_editor(&app.auth);
 
-    let form_content = column![
+    let meta_section = column![
         row![
             title_input,
             button("Save")
                 .on_press(Message::Save)
                 .width(Length::Fixed(ACTION_WIDTH)),
-            env_pick,
-            mode_pick
         ]
         .align_y(Alignment::Center)
         .spacing(6),
         save_path_row,
-        row![
-            method_pick,
-            url_input,
-            button("Send")
-                .on_press(Message::Send)
-                .width(Length::Fixed(ACTION_WIDTH))
-        ]
-        .align_y(Alignment::Center)
-        .spacing(6),
-        rule::horizontal(1),
-        text("Headers"),
-        headers::editor(&app.header_rows),
-        text("Auth"),
-        auth_view,
+        row![env_pick, mode_pick]
+            .align_y(Alignment::Center)
+            .spacing(6),
     ]
-    .padding(8)
     .spacing(6);
 
-    scrollable(form_content).into()
+    let request_section = row![
+        method_pick,
+        url_input,
+        button("Send")
+            .on_press(Message::Send)
+            .width(Length::Fixed(ACTION_WIDTH)),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
+
+    let form_content = column![
+        section("Meta", meta_section.into()),
+        section("Request", request_section.into()),
+        section("Headers", headers::editor(&app.header_rows)),
+        section("Auth", auth_view),
+    ]
+    .spacing(10);
+
+    let form_scroll = scrollable(form_content)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    container(form_scroll)
+        .padding(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn builder_body(app: &Zagel) -> Element<'_, Message> {
-    let graphql_panel: Element<'_, Message> = match app.mode {
+    let body_title = match app.mode {
+        RequestMode::GraphQl => "GraphQL",
+        RequestMode::Rest => "Body",
+    };
+
+    let body_panel: Element<'_, Message> = match app.mode {
         RequestMode::GraphQl => {
             let query_editor: iced::widget::TextEditor<'_, _, _, Theme> =
                 text_editor(&app.graphql_query)
@@ -171,9 +196,9 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
                     .on_action(Message::GraphqlVariablesEdited)
                     .height(Length::FillPortion(2));
             column![
-                text("GraphQL query"),
+                text("Query"),
                 query_editor,
-                text("Variables (JSON)"),
+                text("Variables"),
                 vars_editor,
             ]
             .height(Length::Fill)
@@ -192,7 +217,9 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
         }
     };
 
-    container(column![graphql_panel].padding(8).spacing(6).height(Length::Fill))
+    let body_section = section(body_title, body_panel);
+
+    container(column![body_section].padding(8).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -217,11 +244,21 @@ fn response(app: &Zagel) -> Element<'_, Message> {
         app.response_tab,
     );
 
-    scrollable(
+    let response_section = section(
+        "Response",
         column![status_row, response_view]
-            .padding(8)
             .spacing(6)
-            .width(Length::Fill),
-    )
-    .into()
+            .height(Length::Fill)
+            .into(),
+    );
+
+    let response_scroll = scrollable(response_section)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    container(response_scroll)
+        .padding(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }

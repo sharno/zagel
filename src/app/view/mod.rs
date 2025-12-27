@@ -4,7 +4,7 @@ mod sidebar;
 mod workspace;
 
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{container, text};
+use iced::widget::{column, container, rule, text};
 use iced::{Element, Length};
 
 use super::{Message, Zagel};
@@ -20,6 +20,19 @@ pub enum PaneContent {
     Workspace,
 }
 
+pub fn section<'a, Message: 'a>(
+    title: &'a str,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    container(
+        column![text(title).size(15), rule::horizontal(1), content].spacing(6),
+    )
+    .padding(12)
+    .width(Length::Fill)
+    .style(container::bordered_box)
+    .into()
+}
+
 pub fn view(app: &Zagel) -> Element<'_, Message> {
     let app_ref = app;
 
@@ -30,10 +43,8 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
             app_ref.selection.as_ref(),
             &app_ref.collapsed_collections,
             &app_ref.http_root,
-        ))
-        .title_bar(pane_grid::TitleBar::new(text("Collections"))),
-        PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref))
-            .title_bar(pane_grid::TitleBar::new(text("Request Builder"))),
+        )),
+        PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref)),
     })
     .width(Length::Fill)
     .height(Length::Fill)
