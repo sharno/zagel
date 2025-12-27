@@ -12,7 +12,7 @@ use crate::state::AppState;
 
 use super::options::{AuthState, RequestMode};
 use super::status::{default_environment, status_with_missing};
-use super::{Message, hotkeys, view};
+use super::{EditTarget, Message, hotkeys, view};
 
 const FILE_SCAN_MAX_DEPTH: usize = 6;
 const FILE_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
@@ -23,13 +23,19 @@ pub struct HeaderRow {
     pub value: String,
 }
 
+#[derive(Debug, Default)]
+pub enum EditState {
+    #[default]
+    Off,
+    On { selection: HashSet<EditTarget> },
+}
+
 pub struct Zagel {
     pub(super) collections: Vec<Collection>,
     pub(super) http_files: HashMap<PathBuf, HttpFile>,
     pub(super) http_file_order: Vec<PathBuf>,
     pub(super) selection: Option<RequestId>,
-    pub(super) editing: bool,
-    pub(super) edit_selection: HashSet<super::EditTarget>,
+    pub(super) edit_state: EditState,
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
@@ -97,8 +103,7 @@ impl Zagel {
             http_files: HashMap::new(),
             http_file_order: Vec::new(),
             selection: None,
-            editing: false,
-            edit_selection: HashSet::new(),
+            edit_state: EditState::default(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),

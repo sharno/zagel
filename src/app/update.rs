@@ -11,7 +11,7 @@ use crate::parser::{persist_request, write_http_file};
 
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::{status_with_missing, with_default_environment};
-use super::{CollectionRef, EditTarget, HeaderRow, Message, Zagel};
+use super::{CollectionRef, EditState, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
 
@@ -19,15 +19,27 @@ fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
 }
 
+const fn edit_selection_mut(
+    edit_state: &mut EditState,
+) -> Option<&mut HashSet<EditTarget>> {
+    match edit_state {
+        EditState::On { selection } => Some(selection),
+        EditState::Off => None,
+    }
+}
+
 fn remap_edit_selection(
-    edit_selection: &mut HashSet<EditTarget>,
+    edit_state: &mut EditState,
     mut map: impl FnMut(EditTarget) -> EditTarget,
 ) {
-    let mut next = HashSet::with_capacity(edit_selection.len());
-    for item in edit_selection.drain() {
+    let Some(selection) = edit_selection_mut(edit_state) else {
+        return;
+    };
+    let mut next = HashSet::with_capacity(selection.len());
+    for item in selection.drain() {
         next.insert(map(item));
     }
-    *edit_selection = next;
+    *selection = next;
 }
 
 const fn swap_collection_indices_in_selection(
@@ -44,12 +56,8 @@ const fn swap_collection_indices_in_selection(
     }
 }
 
-fn swap_collection_indices_in_edit_selection(
-    edit_selection: &mut HashSet<EditTarget>,
-    a: usize,
-    b: usize,
-) {
-    remap_edit_selection(edit_selection, |item| match item {
+fn swap_collection_indices_in_edit_selection(edit_state: &mut EditState, a: usize, b: usize) {
+    remap_edit_selection(edit_state, |item| match item {
         EditTarget::Collection(CollectionRef::CollectionIndex(idx)) => {
             if idx == a {
                 EditTarget::Collection(CollectionRef::CollectionIndex(b))
@@ -110,12 +118,12 @@ fn swap_request_indices_in_selection_http(
 }
 
 fn swap_request_indices_in_edit_selection_collection(
-    edit_selection: &mut HashSet<EditTarget>,
+    edit_state: &mut EditState,
     collection: usize,
     a: usize,
     b: usize,
 ) {
-    remap_edit_selection(edit_selection, |item| match item {
+    remap_edit_selection(edit_state, |item| match item {
         EditTarget::Request(RequestId::Collection { collection: c, index }) => {
             if c == collection {
                 if index == a {
@@ -134,12 +142,12 @@ fn swap_request_indices_in_edit_selection_collection(
 }
 
 fn swap_request_indices_in_edit_selection_http(
-    edit_selection: &mut HashSet<EditTarget>,
+    edit_state: &mut EditState,
     path: &PathBuf,
     a: usize,
     b: usize,
 ) {
-    remap_edit_selection(edit_selection, |item| match item {
+    remap_edit_selection(edit_state, |item| match item {
         EditTarget::Request(RequestId::HttpFile { path: p, index }) => {
             if p == *path {
                 if index == a {
@@ -195,28 +203,33 @@ impl Zagel {
                 Task::none()
             }
             Message::ToggleEditMode => {
-                self.editing = !self.editing;
-                if !self.editing {
-                    self.edit_selection.clear();
-                }
+                self.edit_state = match self.edit_state {
+                    EditState::Off => EditState::On {
+                        selection: HashSet::new(),
+                    },
+                    EditState::On { .. } => EditState::Off,
+                };
                 Task::none()
             }
             Message::ToggleEditSelection(target) => {
-                if !self.edit_selection.remove(&target) {
-                    self.edit_selection.insert(target);
+                if let Some(selection) = edit_selection_mut(&mut self.edit_state)
+                    && !selection.remove(&target)
+                {
+                    selection.insert(target);
                 }
                 Task::none()
             }
             Message::DeleteSelected => {
-                if self.edit_selection.is_empty() {
-                    return Task::none();
-                }
+                let selection = match &self.edit_state {
+                    EditState::On { selection } if !selection.is_empty() => selection.clone(),
+                    _ => return Task::none(),
+                };
 
                 let mut remove_collection_indices = Vec::new();
                 let mut remove_file_paths = Vec::new();
                 let mut request_ids = Vec::new();
 
-                for target in &self.edit_selection {
+                for target in &selection {
                     match target {
                         EditTarget::Collection(CollectionRef::CollectionIndex(idx)) => {
                             remove_collection_indices.push(*idx);
@@ -320,7 +333,9 @@ impl Zagel {
                         .retain(|path| !remove_files_set.contains(path));
                 }
 
-                self.edit_selection.clear();
+                if let EditState::On { selection } = &mut self.edit_state {
+                    selection.clear();
+                }
                 if errors.is_empty() {
                     self.update_status_with_missing("Deleted selection");
                 } else {
@@ -352,7 +367,7 @@ impl Zagel {
                             self.collections.swap(idx, idx - 1);
                             swap_collection_indices_in_selection(&mut self.selection, idx, idx - 1);
                             swap_collection_indices_in_edit_selection(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 idx,
                                 idx - 1,
                             );
@@ -376,7 +391,7 @@ impl Zagel {
                             self.collections.swap(idx, idx + 1);
                             swap_collection_indices_in_selection(&mut self.selection, idx, idx + 1);
                             swap_collection_indices_in_edit_selection(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 idx,
                                 idx + 1,
                             );
@@ -411,7 +426,7 @@ impl Zagel {
                                 new_index,
                             );
                             swap_request_indices_in_edit_selection_collection(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 *collection,
                                 *index,
                                 new_index,
@@ -446,7 +461,7 @@ impl Zagel {
                                 updated_index,
                             );
                             swap_request_indices_in_edit_selection_http(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 path,
                                 *index,
                                 updated_index,
@@ -474,7 +489,7 @@ impl Zagel {
                                 new_index,
                             );
                             swap_request_indices_in_edit_selection_collection(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 *collection,
                                 *index,
                                 new_index,
@@ -506,7 +521,7 @@ impl Zagel {
                                 updated_index,
                             );
                             swap_request_indices_in_edit_selection_http(
-                                &mut self.edit_selection,
+                                &mut self.edit_state,
                                 path,
                                 *index,
                                 updated_index,

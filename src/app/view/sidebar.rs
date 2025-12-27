@@ -5,7 +5,7 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use super::section;
-use super::super::{CollectionRef, EditTarget, Message};
+use super::super::{CollectionRef, EditState, EditTarget, Message};
 use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 10;
@@ -18,15 +18,14 @@ pub struct SidebarContext<'a> {
     pub selection: Option<&'a RequestId>,
     pub collapsed: &'a BTreeSet<String>,
     pub http_root: &'a Path,
-    pub editing: bool,
-    pub edit_selection: &'a HashSet<EditTarget>,
+    pub edit_state: &'a EditState,
 }
 
 struct RenderContext<'a> {
     selection: Option<&'a RequestId>,
     collapsed: &'a BTreeSet<String>,
     editing: bool,
-    edit_selection: &'a HashSet<EditTarget>,
+    edit_selection: Option<&'a HashSet<EditTarget>>,
 }
 
 #[derive(Default)]
@@ -48,14 +47,19 @@ struct RequestItem {
 }
 
 pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
+    let (editing, edit_selection) = match ctx.edit_state {
+        EditState::On { selection } => (true, Some(selection)),
+        EditState::Off => (false, None),
+    };
     let mut header = row![
         text("Requests").size(20),
         button("Add").on_press(Message::AddRequest)
     ]
     .align_y(Alignment::Center)
     .spacing(6);
-    if ctx.editing {
-        let delete_button = if ctx.edit_selection.is_empty() {
+    if editing {
+        let selection_empty = edit_selection.is_none_or(HashSet::is_empty);
+        let delete_button = if selection_empty {
             button("Delete")
         } else {
             button("Delete").on_press(Message::DeleteSelected)
@@ -129,8 +133,8 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     let render_ctx = RenderContext {
         selection: ctx.selection,
         collapsed: ctx.collapsed,
-        editing: ctx.editing,
-        edit_selection: ctx.edit_selection,
+        editing,
+        edit_selection,
     };
     let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(4);
     let collections_section = section("Collections", list.into());
@@ -217,9 +221,12 @@ fn render_tree<'a>(
                     .map(CollectionRef::CollectionIndex)
             });
 
-        if ctx.editing && let Some(collection_ref) = collection_ref.clone() {
+        if ctx.editing
+            && let (Some(edit_selection), Some(collection_ref)) =
+                (ctx.edit_selection, collection_ref.clone())
+        {
             let target = EditTarget::Collection(collection_ref.clone());
-            let selected = ctx.edit_selection.contains(&target);
+            let selected = edit_selection.contains(&target);
             let label = if selected { "[x]" } else { "[ ]" };
             row_widgets = row_widgets
                 .push(button(text(label)).on_press(Message::ToggleEditSelection(target)))
@@ -271,9 +278,9 @@ fn render_tree<'a>(
             };
             let mut row_widgets =
                 row![Space::new().width(Length::Fixed(indent_px(depth + 1)))];
-            if ctx.editing {
+            if ctx.editing && let Some(edit_selection) = ctx.edit_selection {
                 let target = EditTarget::Request(item.id.clone());
-                let selected = ctx.edit_selection.contains(&target);
+                let selected = edit_selection.contains(&target);
                 let select_label = if selected { "[x]" } else { "[ ]" };
                 row_widgets = row_widgets
                     .push(button(text(select_label)).on_press(Message::ToggleEditSelection(target)))

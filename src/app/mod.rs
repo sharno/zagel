@@ -7,5 +7,5 @@ mod status;
 mod update;
 mod view;
 
-pub use lifecycle::{HeaderRow, Zagel, run};
+pub use lifecycle::{EditState, HeaderRow, Zagel, run};
 pub use messages::{CollectionRef, EditTarget, Message};
