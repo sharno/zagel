@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
@@ -14,6 +15,7 @@ use super::status::{status_with_missing, with_default_environment};
 use super::{CollectionRef, EditState, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
+const FILE_SCAN_DEBOUNCE: Duration = Duration::from_millis(300);
 
 fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
@@ -169,7 +171,21 @@ fn swap_request_indices_in_edit_selection_http(
 impl Zagel {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Tick => self.rescan_files(),
+            Message::FilesChanged => {
+                if matches!(self.edit_state, EditState::On { .. }) {
+                    self.pending_rescan = true;
+                    return Task::none();
+                }
+                let now = Instant::now();
+                if let Some(last) = self.last_scan
+                    && now.duration_since(last) < FILE_SCAN_DEBOUNCE
+                {
+                    return Task::none();
+                }
+                self.last_scan = Some(now);
+                self.pending_rescan = false;
+                self.rescan_files()
+            }
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
                 self.http_file_order
@@ -203,12 +219,22 @@ impl Zagel {
                 Task::none()
             }
             Message::ToggleEditMode => {
-                self.edit_state = match self.edit_state {
-                    EditState::Off => EditState::On {
+                let was_editing = matches!(self.edit_state, EditState::On { .. });
+                self.edit_state = if was_editing {
+                    EditState::Off
+                } else {
+                    EditState::On {
                         selection: HashSet::new(),
-                    },
-                    EditState::On { .. } => EditState::Off,
+                    }
                 };
+                if was_editing {
+                    self.persist_state();
+                    if self.pending_rescan {
+                        self.pending_rescan = false;
+                        self.last_scan = Some(Instant::now());
+                        return self.rescan_files();
+                    }
+                }
                 Task::none()
             }
             Message::ToggleEditSelection(target) => {

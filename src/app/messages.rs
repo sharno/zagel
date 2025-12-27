@@ -22,7 +22,7 @@ pub enum EditTarget {
 pub enum Message {
     HttpFilesLoaded(HashMap<PathBuf, HttpFile>),
     EnvironmentsLoaded(Vec<Environment>),
-    Tick,
+    FilesChanged,
     Select(RequestId),
     MethodSelected(Method),
     UrlChanged(String),

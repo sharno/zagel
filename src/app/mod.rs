@@ -4,6 +4,7 @@ mod lifecycle;
 mod messages;
 mod options;
 mod status;
+mod watcher;
 mod update;
 mod view;
 
