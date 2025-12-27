@@ -130,7 +130,7 @@ impl Zagel {
     }
 
     pub(super) const fn theme(_: &Self) -> Theme {
-        Theme::Nord
+        Theme::CatppuccinMocha
     }
 
     pub(super) fn rescan_files(&self) -> Task<Message> {

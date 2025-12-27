@@ -104,7 +104,7 @@ pub fn response_panel<'a>(
             let syntax = response_syntax(resp);
             let body_editor = text_editor(content)
                 .height(Length::Fill)
-                .highlight(syntax, HighlightTheme::SolarizedDark)
+                .highlight(syntax, HighlightTheme::Base16Mocha)
                 .wrapping(Wrapping::None);
 
             let body_section: Element<'_, Message> = column![
