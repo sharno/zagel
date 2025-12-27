@@ -1,8 +1,9 @@
 use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, text, text_editor, text_input,
+    button, column, container, pick_list, row, rule, scrollable, stack, text,
+    text_editor, text_input,
 };
-use iced::{Element, Length, Theme};
+use iced::{alignment, border, Color, Element, Length, Theme};
 
 use super::super::{Message, Zagel, headers};
 use super::auth::auth_editor;
@@ -162,7 +163,6 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
 
 fn response(app: &Zagel) -> Element<'_, Message> {
     let mut status_row = row![
-        text(format!("Status: {}", app.status_line.clone())),
         response_view_toggle(app.response_display),
         response_tab_toggle(app.response_tab),
     ]
@@ -179,11 +179,53 @@ fn response(app: &Zagel) -> Element<'_, Message> {
         app.response_tab,
     );
 
-    scrollable(
+    let base = scrollable(
         column![status_row, response_view]
             .padding(12)
             .spacing(8)
             .width(Length::Fill),
     )
-    .into()
+    .into();
+
+    if app.show_shortcuts {
+        let overlay = container(shortcuts_panel())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Top)
+            .padding(12)
+            .into();
+
+        return stack([base, overlay]).into();
+    }
+
+    base
+}
+
+fn shortcuts_panel() -> Element<'static, Message> {
+    let header = row![
+        text("Keyboard shortcuts").size(16),
+        button("Close").on_press(Message::ToggleShortcutsHelp)
+    ]
+    .spacing(8);
+
+    let shortcuts = column![
+        text("? - Toggle shortcuts help").size(14),
+        text("Ctrl/Cmd+S - Save request").size(14),
+        text("Ctrl/Cmd+Enter - Send request").size(14),
+    ]
+    .spacing(2);
+
+    container(column![header, shortcuts].spacing(6))
+        .padding(10)
+        .style(|_| {
+            iced::widget::container::Style::default()
+                .background(Color::from_rgb8(24, 25, 28))
+                .border(
+                    border::rounded(8.0)
+                        .width(1.0)
+                        .color(Color::from_rgb8(70, 73, 80)),
+                )
+        })
+        .into()
 }
