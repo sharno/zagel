@@ -48,6 +48,7 @@ pub struct Zagel {
     pub(super) header_rows: Vec<HeaderRow>,
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
+    pub(super) show_shortcuts: bool,
     pub(super) panes: pane_grid::State<crate::app::view::PaneContent>,
     pub(super) workspace_panes: pane_grid::State<crate::app::view::WorkspacePane>,
     pub(super) builder_panes: pane_grid::State<crate::app::view::BuilderPane>,
@@ -75,20 +76,20 @@ impl Zagel {
         let (mut workspace_panes, builder) =
             pane_grid::State::new(super::view::WorkspacePane::Builder);
         if let Some((_, split)) = workspace_panes.split(
-            pane_grid::Axis::Vertical,
+            pane_grid::Axis::Horizontal,
             builder,
             super::view::WorkspacePane::Response,
         ) {
-            workspace_panes.resize(split, 0.6);
+            workspace_panes.resize(split, 0.62);
         }
 
         let (mut builder_panes, form) = pane_grid::State::new(super::view::BuilderPane::Form);
         if let Some((_, split)) = builder_panes.split(
-            pane_grid::Axis::Horizontal,
+            pane_grid::Axis::Vertical,
             form,
             super::view::BuilderPane::Body,
         ) {
-            builder_panes.resize(split, 0.55);
+            builder_panes.resize(split, 0.45);
         }
 
         let mut app = Self {
@@ -116,6 +117,7 @@ impl Zagel {
             header_rows: Vec::new(),
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
+            show_shortcuts: false,
             panes,
             workspace_panes,
             builder_panes,
@@ -135,8 +137,8 @@ impl Zagel {
         ])
     }
 
-    pub(super) const fn theme(_: &Self) -> Theme {
-        Theme::Nord
+    pub(super) const fn theme(state: &Self) -> Theme {
+        state.state.theme.iced_theme()
     }
 
     pub(super) fn rescan_files(&self) -> Task<Message> {

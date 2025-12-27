@@ -58,4 +58,5 @@ pub enum Message {
     MoveRequestUp(RequestId),
     MoveRequestDown(RequestId),
     AddRequest,
+    ToggleShortcutsHelp,
 }

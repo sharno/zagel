@@ -1,13 +1,14 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use iced::widget::{Space, button, column, row, scrollable, text};
-use iced::{Element, Length};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::{Alignment, Element, Length};
 
+use super::section;
 use super::super::{CollectionRef, EditTarget, Message};
 use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
 
-const INDENT: i16 = 14;
+const INDENT: i16 = 10;
 
 #[derive(Clone, Copy)]
 pub struct SidebarContext<'a> {
@@ -47,8 +48,12 @@ struct RequestItem {
 }
 
 pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
-    let mut header = row![text("Requests").size(18), button("Add").on_press(Message::AddRequest)]
-        .spacing(8);
+    let mut header = row![
+        text("Requests").size(20),
+        button("Add").on_press(Message::AddRequest)
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
     if ctx.editing {
         let delete_button = if ctx.edit_selection.is_empty() {
             button("Delete")
@@ -61,8 +66,6 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     } else {
         header = header.push(button("Edit").on_press(Message::ToggleEditMode));
     }
-
-    let mut items = column![header];
 
     let mut tree = TreeNode::default();
 
@@ -123,17 +126,23 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         );
     }
 
-    items = items.push(text("Collections").size(14));
     let render_ctx = RenderContext {
         selection: ctx.selection,
         collapsed: ctx.collapsed,
         editing: ctx.editing,
         edit_selection: ctx.edit_selection,
     };
-    items = render_tree(items, &tree, "", 0, &render_ctx);
+    let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(4);
+    let collections_section = section("Collections", list.into());
 
-    scrollable(items.spacing(6).padding(8))
+    let list = scrollable(column![header, collections_section].spacing(10))
         .width(Length::Fill)
+        .height(Length::Fill);
+
+    container(list)
+        .padding(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
 
@@ -191,7 +200,7 @@ fn render_tree<'a>(
         let toggle_label = if is_collapsed { "▶" } else { "▼" };
         let toggle = button(text(toggle_label))
             .style(button::secondary)
-            .padding(4)
+            .padding(2)
             .on_press(Message::ToggleCollection(full_path.clone()));
 
         let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
@@ -245,7 +254,7 @@ fn render_tree<'a>(
             row_widgets = row_widgets.push(text(child.name.clone()).size(14));
         }
 
-        column = column.push(row_widgets.spacing(6));
+        column = column.push(row_widgets.spacing(4));
 
         if !is_collapsed {
             column = render_tree(column, &child.node, &full_path, depth + 1, ctx);
@@ -273,10 +282,15 @@ fn render_tree<'a>(
             }
             row_widgets = row_widgets.push(
                 button(text(label))
+                    .style(if is_selected {
+                        button::primary
+                    } else {
+                        button::secondary
+                    })
                     .width(Length::Fill)
                     .on_press(Message::Select(item.id.clone())),
             );
-            column = column.push(row_widgets.spacing(6));
+            column = column.push(row_widgets.spacing(4));
         }
     }
 
