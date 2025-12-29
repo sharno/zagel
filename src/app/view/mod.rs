@@ -38,7 +38,6 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
 
     let grid = PaneGrid::new(&app_ref.panes, move |_, pane, _| match pane {
         PaneContent::Sidebar => pane_grid::Content::new(sidebar(SidebarContext {
-            collections: &app_ref.collections,
             http_files: &app_ref.http_files,
             http_file_order: &app_ref.http_file_order,
             selection: app_ref.selection.as_ref(),

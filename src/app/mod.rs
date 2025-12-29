@@ -9,4 +9,4 @@ mod update;
 mod view;
 
 pub use lifecycle::{EditState, HeaderRow, Zagel, run};
-pub use messages::{CollectionRef, EditTarget, Message};
+pub use messages::{EditTarget, Message};

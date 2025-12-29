@@ -7,14 +7,8 @@ use iced::widget::text_editor;
 use crate::model::{Environment, HttpFile, Method, RequestId, ResponsePreview};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CollectionRef {
-    CollectionIndex(usize),
-    HttpFile(PathBuf),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EditTarget {
-    Collection(CollectionRef),
+    Collection(PathBuf),
     Request(RequestId),
 }
 
@@ -54,8 +48,8 @@ pub enum Message {
     ToggleEditMode,
     ToggleEditSelection(EditTarget),
     DeleteSelected,
-    MoveCollectionUp(CollectionRef),
-    MoveCollectionDown(CollectionRef),
+    MoveCollectionUp(PathBuf),
+    MoveCollectionDown(PathBuf),
     MoveRequestUp(RequestId),
     MoveRequestDown(RequestId),
     AddRequest,

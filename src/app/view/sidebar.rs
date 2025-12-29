@@ -5,14 +5,13 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use super::section;
-use super::super::{CollectionRef, EditState, EditTarget, Message};
-use crate::model::{Collection, HttpFile, RequestDraft, RequestId};
+use super::super::{EditState, EditTarget, Message};
+use crate::model::{HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 10;
 
 #[derive(Clone, Copy)]
 pub struct SidebarContext<'a> {
-    pub collections: &'a [Collection],
     pub http_files: &'a HashMap<PathBuf, HttpFile>,
     pub http_file_order: &'a [PathBuf],
     pub selection: Option<&'a RequestId>,
@@ -33,7 +32,6 @@ struct TreeNode {
     children: Vec<TreeChild>,
     requests: Vec<RequestItem>,
     file_path: Option<PathBuf>,
-    collection_index: Option<usize>,
 }
 
 struct TreeChild {
@@ -73,31 +71,6 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
 
     let mut tree = TreeNode::default();
 
-    for (idx, collection) in ctx.collections.iter().enumerate() {
-        let segments: Vec<&str> = collection
-            .name
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        insert_collection(
-            &mut tree,
-            &segments,
-            None,
-            Some(idx),
-            collection
-                .requests
-                .iter()
-                .enumerate()
-                .map(|(r_idx, draft)| RequestItem {
-                    id: RequestId::Collection {
-                        collection: idx,
-                        index: r_idx,
-                    },
-                    draft: draft.clone(),
-                }),
-        );
-    }
-
     for path in ctx.http_file_order {
         let Some(file) = ctx.http_files.get(path) else {
             continue;
@@ -116,7 +89,6 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
             &mut tree,
             &segments.iter().map(String::as_str).collect::<Vec<_>>(),
             Some(&file.path),
-            None,
             file.requests
                 .iter()
                 .enumerate()
@@ -154,7 +126,6 @@ fn insert_collection(
     root: &mut TreeNode,
     segments: &[&str],
     file_path: Option<&PathBuf>,
-    collection_index: Option<usize>,
     requests: impl Iterator<Item = RequestItem>,
 ) {
     if segments.is_empty() {
@@ -168,9 +139,6 @@ fn insert_collection(
     let leaf = child_mut(node, segments[segments.len() - 1]);
     if leaf.file_path.is_none() {
         leaf.file_path = file_path.cloned();
-    }
-    if leaf.collection_index.is_none() {
-        leaf.collection_index = collection_index;
     }
     leaf.requests.extend(requests);
 }
@@ -209,39 +177,30 @@ fn render_tree<'a>(
 
         let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
 
-        let collection_ref = child
-            .node
-            .file_path
-            .as_ref()
-            .map(|file_path| CollectionRef::HttpFile(file_path.clone()))
-            .or_else(|| {
-                child
-                    .node
-                    .collection_index
-                    .map(CollectionRef::CollectionIndex)
-            });
+        let collection_path = child.node.file_path.clone();
 
         if ctx.editing
-            && let (Some(edit_selection), Some(collection_ref)) =
-                (ctx.edit_selection, collection_ref.clone())
+            && let (Some(edit_selection), Some(collection_path)) =
+                (ctx.edit_selection, collection_path.clone())
         {
-            let target = EditTarget::Collection(collection_ref.clone());
+            let target = EditTarget::Collection(collection_path.clone());
             let selected = edit_selection.contains(&target);
             let label = if selected { "[x]" } else { "[ ]" };
             row_widgets = row_widgets
-                .push(button(text(label)).on_press(Message::ToggleEditSelection(target)))
-                .push(button(text("^")).on_press(Message::MoveCollectionUp(collection_ref.clone())))
-                .push(button(text("v")).on_press(Message::MoveCollectionDown(collection_ref)));
+                .push(button(text(label)).on_press(Message::ToggleEditSelection(
+                    target)))
+                .push(button(text("^")).on_press(Message::MoveCollectionUp(
+                    collection_path.clone(),
+                )))
+                .push(button(text("v")).on_press(Message::MoveCollectionDown(
+                    collection_path,
+                )));
         }
 
         if let Some(file_path) = &child.node.file_path {
-            let is_selected = ctx
-                .selection
-                .and_then(|id| match id {
-                    RequestId::HttpFile { path, .. } => Some(path),
-                    RequestId::Collection { .. } => None,
-                })
-                .is_some_and(|p| p == file_path);
+            let is_selected = ctx.selection.is_some_and(|id| {
+                matches!(id, RequestId::HttpFile { path, .. } if path == file_path)
+            });
 
             let select_id = RequestId::HttpFile {
                 path: file_path.clone(),

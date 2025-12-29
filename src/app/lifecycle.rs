@@ -6,8 +6,8 @@ use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application};
 use reqwest::Client;
 
-use crate::model::{Collection, Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
-use crate::parser::{scan_env_files, scan_http_files, suggest_http_path};
+use crate::model::{Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
+use crate::parser::{scan_env_files, scan_http_files};
 use crate::state::AppState;
 
 use super::options::{AuthState, RequestMode};
@@ -30,7 +30,6 @@ pub enum EditState {
 }
 
 pub struct Zagel {
-    pub(super) collections: Vec<Collection>,
     pub(super) http_files: HashMap<PathBuf, HttpFile>,
     pub(super) http_file_order: Vec<PathBuf>,
     pub(super) selection: Option<RequestId>,
@@ -100,7 +99,6 @@ impl Zagel {
         }
 
         let mut app = Self {
-            collections: Vec::new(),
             http_files: HashMap::new(),
             http_file_order: state.http_file_order.clone(),
             selection: None,
@@ -190,17 +188,12 @@ impl Zagel {
     }
 
     pub(super) fn apply_selection(&mut self, id: &RequestId) {
+        let RequestId::HttpFile { path, index } = id;
         self.selection = Some(id.clone());
-        let maybe_request = match id {
-            RequestId::Collection { collection, index } => self
-                .collections
-                .get(*collection)
-                .and_then(|c| c.requests.get(*index)),
-            RequestId::HttpFile { path, index } => self
-                .http_files
-                .get(path)
-                .and_then(|file| file.requests.get(*index)),
-        };
+        let maybe_request = self
+            .http_files
+            .get(path)
+            .and_then(|file| file.requests.get(*index));
 
         let draft = maybe_request.cloned().unwrap_or_else(|| RequestDraft {
             title: "New request".to_string(),
@@ -209,12 +202,7 @@ impl Zagel {
         self.draft = draft.clone();
         self.body_editor = iced::widget::text_editor::Content::with_text(&draft.body);
         self.set_header_rows_from_draft();
-        self.save_path = match id {
-            RequestId::HttpFile { path, .. } => path.display().to_string(),
-            RequestId::Collection { .. } => suggest_http_path(&self.http_root, &draft.title)
-                .display()
-                .to_string(),
-        };
+        self.save_path = path.display().to_string();
         self.update_status_with_missing("Ready");
         self.update_response_viewer();
     }
