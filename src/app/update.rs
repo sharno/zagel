@@ -186,6 +186,10 @@ impl Zagel {
                 self.pending_rescan = false;
                 self.rescan_files()
             }
+            Message::WatcherUnavailable(message) => {
+                self.update_status_with_missing(&message);
+                Task::none()
+            }
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
                 self.http_file_order

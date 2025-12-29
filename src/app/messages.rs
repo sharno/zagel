@@ -23,6 +23,7 @@ pub enum Message {
     HttpFilesLoaded(HashMap<PathBuf, HttpFile>),
     EnvironmentsLoaded(Vec<Environment>),
     FilesChanged,
+    WatcherUnavailable(String),
     Select(RequestId),
     MethodSelected(Method),
     UrlChanged(String),
