@@ -1,6 +1,9 @@
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::mpsc as std_mpsc;
+use std::task::{Context, Poll};
 
-use iced::futures::{channel::mpsc, stream::BoxStream, StreamExt};
+use iced::futures::{channel::mpsc, stream::BoxStream, Stream, StreamExt};
 use iced::Subscription;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -20,9 +23,30 @@ pub fn subscription(root: PathBuf) -> Subscription<Message> {
 #[derive(Clone, Hash)]
 struct WatchRoot(PathBuf);
 
+struct WatchStream {
+    receiver: mpsc::Receiver<Message>,
+    shutdown: std_mpsc::Sender<()>,
+}
+
+impl Stream for WatchStream {
+    type Item = Message;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let receiver = Pin::new(&mut self.get_mut().receiver);
+        receiver.poll_next(cx)
+    }
+}
+
+impl Drop for WatchStream {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(());
+    }
+}
+
 fn watch_stream(root: &WatchRoot) -> BoxStream<'static, Message> {
     let root = root.0.clone();
     let (sender, receiver) = mpsc::channel(64);
+    let (shutdown_tx, shutdown_rx) = std_mpsc::channel();
 
     std::thread::spawn(move || {
         let mut status_sender = sender.clone();
@@ -66,10 +90,13 @@ fn watch_stream(root: &WatchRoot) -> BoxStream<'static, Message> {
             return;
         }
 
-        loop {
-            std::thread::park();
-        }
+        // Block until the subscription drops so the watcher shuts down cleanly.
+        let _ = shutdown_rx.recv();
     });
 
-    receiver.boxed()
+    WatchStream {
+        receiver,
+        shutdown: shutdown_tx,
+    }
+    .boxed()
 }
