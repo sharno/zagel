@@ -6,11 +6,18 @@ use iced::widget::text_editor;
 
 use crate::model::{Environment, HttpFile, Method, RequestId, ResponsePreview};
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EditTarget {
+    Collection(PathBuf),
+    Request(RequestId),
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     HttpFilesLoaded(HashMap<PathBuf, HttpFile>),
     EnvironmentsLoaded(Vec<Environment>),
-    Tick,
+    FilesChanged,
+    WatcherUnavailable(String),
     Select(RequestId),
     MethodSelected(Method),
     UrlChanged(String),
@@ -38,6 +45,13 @@ pub enum Message {
     WorkspacePaneResized(pane_grid::ResizeEvent),
     BuilderPaneResized(pane_grid::ResizeEvent),
     ToggleCollection(String),
+    ToggleEditMode,
+    ToggleEditSelection(EditTarget),
+    DeleteSelected,
+    MoveCollectionUp(PathBuf),
+    MoveCollectionDown(PathBuf),
+    MoveRequestUp(RequestId),
+    MoveRequestDown(RequestId),
     AddRequest,
     ToggleShortcutsHelp,
 }

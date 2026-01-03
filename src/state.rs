@@ -11,6 +11,8 @@ pub struct AppState {
     pub http_root: Option<PathBuf>,
     #[serde(default)]
     pub theme: ThemeChoice,
+    #[serde(default)]
+    pub http_file_order: Vec<PathBuf>,
 }
 
 impl AppState {

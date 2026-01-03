@@ -1,29 +1,125 @@
+use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
 use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
 use crate::net::send_request;
-use crate::parser::persist_request;
+use crate::parser::{persist_request, write_http_file};
 
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::{status_with_missing, with_default_environment};
-use super::{HeaderRow, Message, Zagel};
+use super::{EditState, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
+const FILE_SCAN_DEBOUNCE: Duration = Duration::from_millis(300);
 
 fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
+}
+
+const fn edit_selection_mut(
+    edit_state: &mut EditState,
+) -> Option<&mut HashSet<EditTarget>> {
+    match edit_state {
+        EditState::On { selection } => Some(selection),
+        EditState::Off => None,
+    }
+}
+
+fn remap_edit_selection(
+    edit_state: &mut EditState,
+    mut map: impl FnMut(EditTarget) -> EditTarget,
+) {
+    let Some(selection) = edit_selection_mut(edit_state) else {
+        return;
+    };
+    let mut next = HashSet::with_capacity(selection.len());
+    for item in selection.drain() {
+        next.insert(map(item));
+    }
+    *selection = next;
+}
+
+fn swap_request_indices_in_selection_http(
+    selection: &mut Option<RequestId>,
+    path: &PathBuf,
+    a: usize,
+    b: usize,
+) {
+    if let Some(RequestId::HttpFile { path: sel_path, index }) = selection.as_mut()
+        && sel_path == path
+    {
+        if *index == a {
+            *index = b;
+        } else if *index == b {
+            *index = a;
+        }
+    }
+}
+
+fn swap_request_indices_in_edit_selection_http(
+    edit_state: &mut EditState,
+    path: &PathBuf,
+    a: usize,
+    b: usize,
+) {
+    remap_edit_selection(edit_state, |item| match item {
+        EditTarget::Request(RequestId::HttpFile { path: p, index }) => {
+            if p == *path {
+                if index == a {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index: b })
+                } else if index == b {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index: a })
+                } else {
+                    EditTarget::Request(RequestId::HttpFile { path: p, index })
+                }
+            } else {
+                EditTarget::Request(RequestId::HttpFile { path: p, index })
+            }
+        }
+        other => other,
+    });
 }
 
 #[allow(clippy::too_many_lines)]
 impl Zagel {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Tick => self.rescan_files(),
+            Message::FilesChanged => {
+                if matches!(self.edit_state, EditState::On { .. }) {
+                    self.pending_rescan = true;
+                    return Task::none();
+                }
+                let now = Instant::now();
+                if let Some(last) = self.last_scan
+                    && now.duration_since(last) < FILE_SCAN_DEBOUNCE
+                {
+                    return Task::none();
+                }
+                self.last_scan = Some(now);
+                self.pending_rescan = false;
+                self.rescan_files()
+            }
+            Message::WatcherUnavailable(message) => {
+                self.update_status_with_missing(&message);
+                Task::none()
+            }
             Message::HttpFilesLoaded(files) => {
                 self.http_files = files;
+                self.http_file_order
+                    .retain(|path| self.http_files.contains_key(path));
+                let mut new_paths: Vec<PathBuf> = self
+                    .http_files
+                    .keys()
+                    .filter(|path| !self.http_file_order.contains(path))
+                    .cloned()
+                    .collect();
+                new_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+                self.http_file_order.extend(new_paths);
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
@@ -41,6 +137,228 @@ impl Zagel {
             Message::ToggleCollection(path) => {
                 if !self.collapsed_collections.remove(&path) {
                     self.collapsed_collections.insert(path);
+                }
+                Task::none()
+            }
+            Message::ToggleEditMode => {
+                let was_editing = matches!(self.edit_state, EditState::On { .. });
+                self.edit_state = if was_editing {
+                    EditState::Off
+                } else {
+                    EditState::On {
+                        selection: HashSet::new(),
+                    }
+                };
+                if was_editing {
+                    self.persist_state();
+                    if self.pending_rescan {
+                        self.pending_rescan = false;
+                        self.last_scan = Some(Instant::now());
+                        return self.rescan_files();
+                    }
+                }
+                Task::none()
+            }
+            Message::ToggleEditSelection(target) => {
+                if let Some(selection) = edit_selection_mut(&mut self.edit_state)
+                    && !selection.remove(&target)
+                {
+                    selection.insert(target);
+                }
+                Task::none()
+            }
+            Message::DeleteSelected => {
+                let selection = match &self.edit_state {
+                    EditState::On { selection } if !selection.is_empty() => selection.clone(),
+                    _ => return Task::none(),
+                };
+
+                let mut remove_file_paths = Vec::new();
+                let mut request_ids = Vec::new();
+
+                for target in &selection {
+                    match target {
+                        EditTarget::Collection(path) => {
+                            remove_file_paths.push(path.clone());
+                        }
+                        EditTarget::Request(id) => request_ids.push(id.clone()),
+                    }
+                }
+
+                remove_file_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+                remove_file_paths.dedup();
+
+                let remove_files_set: HashSet<PathBuf> =
+                    remove_file_paths.iter().cloned().collect();
+
+                let mut file_request_removals = std::collections::HashMap::new();
+
+                for id in request_ids {
+                    let RequestId::HttpFile { path, index } = id;
+                    if remove_files_set.contains(&path) {
+                        continue;
+                    }
+                    file_request_removals
+                        .entry(path)
+                        .or_insert_with(Vec::new)
+                        .push(index);
+                }
+
+                let mut errors = Vec::new();
+
+                for (path, mut indices) in file_request_removals {
+                    if let Some(file) = self.http_files.get_mut(&path) {
+                        let mut updated_requests = file.requests.clone();
+                        indices.sort_unstable();
+                        indices.dedup();
+                        for idx in indices.into_iter().rev() {
+                            if idx < updated_requests.len() {
+                                updated_requests.remove(idx);
+                            }
+                        }
+                        if let Err(err) = write_http_file(&file.path, &updated_requests) {
+                            errors.push(format!(
+                                "Failed to update {}: {}",
+                                file.path.display(),
+                                err
+                            ));
+                        } else {
+                            file.requests = updated_requests;
+                        }
+                    }
+                }
+
+                for path in &remove_file_paths {
+                    match fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(_err) if !path.exists() => {}
+                        Err(err) => errors.push(format!(
+                            "Failed to delete {}: {}",
+                            path.display(),
+                            err
+                        )),
+                    }
+                    self.http_files.remove(path);
+                }
+                if !remove_file_paths.is_empty() {
+                    self.http_file_order
+                        .retain(|path| !remove_files_set.contains(path));
+                }
+
+                if let EditState::On { selection } = &mut self.edit_state {
+                    selection.clear();
+                }
+                if errors.is_empty() {
+                    self.update_status_with_missing("Deleted selection");
+                } else {
+                    self.update_status_with_missing(&errors.join("; "));
+                }
+
+                if let Some(RequestId::HttpFile { path, index }) = self.selection.clone()
+                    && self
+                        .http_files
+                        .get(&path)
+                        .is_none_or(|file| index >= file.requests.len())
+                {
+                    self.selection = None;
+                }
+
+                Task::none()
+            }
+            Message::MoveCollectionUp(path) => {
+                if let Some(pos) = self.http_file_order.iter().position(|p| p == &path)
+                    && pos > 0
+                {
+                    self.http_file_order.swap(pos, pos - 1);
+                }
+                Task::none()
+            }
+            Message::MoveCollectionDown(path) => {
+                if let Some(pos) = self.http_file_order.iter().position(|p| p == &path)
+                    && pos + 1 < self.http_file_order.len()
+                {
+                    self.http_file_order.swap(pos, pos + 1);
+                }
+                Task::none()
+            }
+            Message::MoveRequestUp(id) => {
+                let RequestId::HttpFile { path, index } = &id;
+                if *index == 0 {
+                    return Task::none();
+                }
+                let mut new_index = None;
+                let mut status_error = None;
+                if let Some(file) = self.http_files.get_mut(path)
+                    && *index < file.requests.len()
+                {
+                    let updated_index = *index - 1;
+                    file.requests.swap(*index, updated_index);
+                    if let Err(err) = write_http_file(&file.path, &file.requests) {
+                        file.requests.swap(*index, updated_index);
+                        status_error = Some(format!(
+                            "Failed to reorder {}: {}",
+                            file.path.display(),
+                            err
+                        ));
+                    } else {
+                        new_index = Some(updated_index);
+                    }
+                }
+                if let Some(updated_index) = new_index {
+                    swap_request_indices_in_selection_http(
+                        &mut self.selection,
+                        path,
+                        *index,
+                        updated_index,
+                    );
+                    swap_request_indices_in_edit_selection_http(
+                        &mut self.edit_state,
+                        path,
+                        *index,
+                        updated_index,
+                    );
+                }
+                if let Some(message) = status_error {
+                    self.update_status_with_missing(&message);
+                }
+                Task::none()
+            }
+            Message::MoveRequestDown(id) => {
+                let RequestId::HttpFile { path, index } = &id;
+                let mut new_index = None;
+                let mut status_error = None;
+                if let Some(file) = self.http_files.get_mut(path)
+                    && *index + 1 < file.requests.len()
+                {
+                    let updated_index = *index + 1;
+                    file.requests.swap(*index, updated_index);
+                    if let Err(err) = write_http_file(&file.path, &file.requests) {
+                        file.requests.swap(*index, updated_index);
+                        status_error = Some(format!(
+                            "Failed to reorder {}: {}",
+                            file.path.display(),
+                            err
+                        ));
+                    } else {
+                        new_index = Some(updated_index);
+                    }
+                }
+                if let Some(updated_index) = new_index {
+                    swap_request_indices_in_selection_http(
+                        &mut self.selection,
+                        path,
+                        *index,
+                        updated_index,
+                    );
+                    swap_request_indices_in_edit_selection_http(
+                        &mut self.edit_state,
+                        path,
+                        *index,
+                        updated_index,
+                    );
+                }
+                if let Some(message) = status_error {
+                    self.update_status_with_missing(&message);
                 }
                 Task::none()
             }
@@ -148,18 +466,7 @@ impl Zagel {
                     title: "New request".to_string(),
                     ..Default::default()
                 };
-                if let Some(RequestId::Collection { collection, .. }) = self.selection {
-                    if let Some(col) = self.collections.get_mut(collection) {
-                        col.requests.push(new_draft);
-                        let new_idx = col.requests.len() - 1;
-                        let new_id = RequestId::Collection {
-                            collection,
-                            index: new_idx,
-                        };
-                        self.apply_selection(&new_id);
-                        return Task::none();
-                    }
-                } else if let Some(RequestId::HttpFile { path, .. }) = self.selection.clone()
+                if let Some(RequestId::HttpFile { path, .. }) = self.selection.clone()
                     && let Some(file) = self.http_files.get_mut(&path)
                 {
                     file.requests.push(new_draft.clone());
@@ -180,7 +487,7 @@ impl Zagel {
                         Message::Saved,
                     );
                 }
-                self.update_status_with_missing("Select a collection to add a request");
+                self.update_status_with_missing("Select a file to add a request");
                 Task::none()
             }
             Message::Send => {

@@ -1,21 +1,20 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::Instant;
 
 use iced::widget::pane_grid;
-use iced::{Subscription, Task, Theme, application, time};
+use iced::{Subscription, Task, Theme, application};
 use reqwest::Client;
 
-use crate::model::{Collection, Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
-use crate::parser::{scan_env_files, scan_http_files, suggest_http_path};
+use crate::model::{Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
+use crate::parser::{scan_env_files, scan_http_files};
 use crate::state::AppState;
 
 use super::options::{AuthState, RequestMode};
 use super::status::{default_environment, status_with_missing};
-use super::{Message, hotkeys, view};
+use super::{EditTarget, Message, hotkeys, view, watcher};
 
 const FILE_SCAN_MAX_DEPTH: usize = 6;
-const FILE_SCAN_COOLDOWN: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct HeaderRow {
@@ -23,10 +22,18 @@ pub struct HeaderRow {
     pub value: String,
 }
 
+#[derive(Debug, Default)]
+pub enum EditState {
+    #[default]
+    Off,
+    On { selection: HashSet<EditTarget> },
+}
+
 pub struct Zagel {
-    pub(super) collections: Vec<Collection>,
     pub(super) http_files: HashMap<PathBuf, HttpFile>,
+    pub(super) http_file_order: Vec<PathBuf>,
     pub(super) selection: Option<RequestId>,
+    pub(super) edit_state: EditState,
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
@@ -46,6 +53,8 @@ pub struct Zagel {
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
     pub(super) show_shortcuts: bool,
+    pub(super) pending_rescan: bool,
+    pub(super) last_scan: Option<Instant>,
     pub(super) panes: pane_grid::State<crate::app::view::PaneContent>,
     pub(super) workspace_panes: pane_grid::State<crate::app::view::WorkspacePane>,
     pub(super) builder_panes: pane_grid::State<crate::app::view::BuilderPane>,
@@ -90,9 +99,10 @@ impl Zagel {
         }
 
         let mut app = Self {
-            collections: Vec::new(),
             http_files: HashMap::new(),
+            http_file_order: state.http_file_order.clone(),
             selection: None,
+            edit_state: EditState::default(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),
@@ -112,6 +122,8 @@ impl Zagel {
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
             show_shortcuts: false,
+            pending_rescan: false,
+            last_scan: None,
             panes,
             workspace_panes,
             builder_panes,
@@ -124,10 +136,10 @@ impl Zagel {
         (app, task)
     }
 
-    pub(super) fn subscription(_state: &Self) -> Subscription<Message> {
+    pub(super) fn subscription(state: &Self) -> Subscription<Message> {
         Subscription::batch([
-            time::every(FILE_SCAN_COOLDOWN).map(|_| Message::Tick),
             hotkeys::subscription(),
+            watcher::subscription(state.http_root.clone()),
         ])
     }
 
@@ -148,9 +160,11 @@ impl Zagel {
         ])
     }
 
-    pub(super) fn persist_state(&self) {
+    pub(super) fn persist_state(&mut self) {
         let mut state = self.state.clone();
         state.http_root = Some(self.http_root.clone());
+        state.http_file_order.clone_from(&self.http_file_order);
+        self.state = state.clone();
         state.save();
     }
 
@@ -174,17 +188,12 @@ impl Zagel {
     }
 
     pub(super) fn apply_selection(&mut self, id: &RequestId) {
+        let RequestId::HttpFile { path, index } = id;
         self.selection = Some(id.clone());
-        let maybe_request = match id {
-            RequestId::Collection { collection, index } => self
-                .collections
-                .get(*collection)
-                .and_then(|c| c.requests.get(*index)),
-            RequestId::HttpFile { path, index } => self
-                .http_files
-                .get(path)
-                .and_then(|file| file.requests.get(*index)),
-        };
+        let maybe_request = self
+            .http_files
+            .get(path)
+            .and_then(|file| file.requests.get(*index));
 
         let draft = maybe_request.cloned().unwrap_or_else(|| RequestDraft {
             title: "New request".to_string(),
@@ -193,12 +202,7 @@ impl Zagel {
         self.draft = draft.clone();
         self.body_editor = iced::widget::text_editor::Content::with_text(&draft.body);
         self.set_header_rows_from_draft();
-        self.save_path = match id {
-            RequestId::HttpFile { path, .. } => path.display().to_string(),
-            RequestId::Collection { .. } => suggest_http_path(&self.http_root, &draft.title)
-                .display()
-                .to_string(),
-        };
+        self.save_path = path.display().to_string();
         self.update_status_with_missing("Ready");
         self.update_response_viewer();
     }

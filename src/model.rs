@@ -83,12 +83,6 @@ pub struct Environment {
 }
 
 #[derive(Debug, Clone)]
-pub struct Collection {
-    pub name: String,
-    pub requests: Vec<RequestDraft>,
-}
-
-#[derive(Debug, Clone)]
 pub struct HttpFile {
     pub path: PathBuf,
     pub requests: Vec<RequestDraft>,
@@ -96,7 +90,6 @@ pub struct HttpFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RequestId {
-    Collection { collection: usize, index: usize },
     HttpFile { path: PathBuf, index: usize },
 }
 

@@ -8,7 +8,7 @@ use iced::widget::{column, container, row, rule, space, text};
 use iced::{Element, Length};
 
 use super::{Message, Zagel};
-use sidebar::sidebar;
+use sidebar::{SidebarContext, sidebar};
 use workspace::workspace;
 
 pub use response::{ResponseDisplay, ResponseTab, pretty_json};
@@ -37,13 +37,14 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
     let app_ref = app;
 
     let grid = PaneGrid::new(&app_ref.panes, move |_, pane, _| match pane {
-        PaneContent::Sidebar => pane_grid::Content::new(sidebar(
-            &app_ref.collections,
-            &app_ref.http_files,
-            app_ref.selection.as_ref(),
-            &app_ref.collapsed_collections,
-            &app_ref.http_root,
-        )),
+        PaneContent::Sidebar => pane_grid::Content::new(sidebar(SidebarContext {
+            http_files: &app_ref.http_files,
+            http_file_order: &app_ref.http_file_order,
+            selection: app_ref.selection.as_ref(),
+            collapsed: &app_ref.collapsed_collections,
+            http_root: &app_ref.http_root,
+            edit_state: &app_ref.edit_state,
+        })),
         PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref)),
     })
     .width(Length::Fill)
