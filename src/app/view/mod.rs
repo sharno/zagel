@@ -36,14 +36,14 @@ pub fn section<'a, Message: 'a>(
 pub fn view(app: &Zagel) -> Element<'_, Message> {
     let app_ref = app;
 
-    let grid = PaneGrid::new(&app_ref.panes, move |_, pane, _| match pane {
+    let grid = PaneGrid::new(&app_ref.view.panes, move |_, pane, _| match pane {
         PaneContent::Sidebar => pane_grid::Content::new(sidebar(SidebarContext {
-            http_files: &app_ref.http_files,
-            http_file_order: &app_ref.http_file_order,
-            selection: app_ref.selection.as_ref(),
-            collapsed: &app_ref.collapsed_collections,
-            http_root: &app_ref.http_root,
-            edit_state: &app_ref.edit_state,
+            http_files: &app_ref.view.http_files,
+            http_file_order: &app_ref.view.http_file_order,
+            selection: app_ref.view.selection.as_ref(),
+            collapsed: &app_ref.view.collapsed_collections,
+            http_root: &app_ref.view.http_root,
+            edit_state: &app_ref.view.edit_state,
         })),
         PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref)),
     })
@@ -61,7 +61,7 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
 }
 
 fn status_bar(app: &Zagel) -> Element<'_, Message> {
-    let hint = if app.show_shortcuts {
+    let hint = if app.view.show_shortcuts {
         "Press ? to hide shortcuts"
     } else {
         "Press ? for shortcuts"
@@ -70,7 +70,7 @@ fn status_bar(app: &Zagel) -> Element<'_, Message> {
     let content = row![
         text(hint).size(12),
         space().width(Length::Fill),
-        text(format!("Status: {}", app.status_line)).size(12),
+        text(format!("Status: {}", app.view.status_line)).size(12),
     ]
     .spacing(8);
 
