@@ -410,13 +410,23 @@ impl Zagel {
                 self.apply_model_action(Action::AuthChanged(new_auth), true, None)
             }
             Message::HeaderNameChanged(idx, value) => {
-                let Some(index) = HeaderIndex::new(idx, self.model.header_rows.len()) else {
+                let len = self.model.header_rows.len();
+                let Some(index) = HeaderIndex::new(idx, len) else {
+                    debug_assert!(
+                        false,
+                        "Invalid header index {idx} for header_rows len {len}"
+                    );
                     return Task::none();
                 };
                 self.apply_model_action(Action::HeaderNameChanged(index, value), true, Some("Ready"))
             }
             Message::HeaderValueChanged(idx, value) => {
-                let Some(index) = HeaderIndex::new(idx, self.model.header_rows.len()) else {
+                let len = self.model.header_rows.len();
+                let Some(index) = HeaderIndex::new(idx, len) else {
+                    debug_assert!(
+                        false,
+                        "Invalid header index {idx} for header_rows len {len}"
+                    );
                     return Task::none();
                 };
                 self.apply_model_action(Action::HeaderValueChanged(index, value), true, Some("Ready"))
@@ -425,7 +435,12 @@ impl Zagel {
                 self.apply_model_action(Action::HeaderAdded, true, Some("Ready"))
             }
             Message::HeaderRemoved(idx) => {
-                let Some(index) = HeaderIndex::new(idx, self.model.header_rows.len()) else {
+                let len = self.model.header_rows.len();
+                let Some(index) = HeaderIndex::new(idx, len) else {
+                    debug_assert!(
+                        false,
+                        "Invalid header index {idx} for header_rows len {len}"
+                    );
                     return Task::none();
                 };
                 self.apply_model_action(Action::HeaderRemoved(index), true, Some("Ready"))
@@ -590,6 +605,11 @@ impl Zagel {
                 };
                 return self.apply_model_action(Action::Emit(effect), false, None);
             }
+            self.view.selection = None;
+            self.view.update_status_with_model(
+                "Selected file is no longer available. Select a file to add a request.",
+                &self.model,
+            );
             return Task::none();
         }
 
@@ -621,7 +641,7 @@ impl Zagel {
             extra_inputs.push(query.clone());
             extra_inputs.push(variables.clone());
             draft.body = build_graphql_body(&query, &variables);
-            if !draft.headers.contains("Content-Type") {
+            if !headers_contain_name(&draft.headers, "Content-Type") {
                 draft.headers.push_str("\nContent-Type: application/json");
             }
         }
@@ -666,7 +686,7 @@ impl Zagel {
                 self.view.selection = Some(id);
                 self.view
                     .update_status_with_model(&format!("Saved to {}", path.display()), &self.model);
-                Task::batch([Task::none(), self.rescan_files()])
+                self.rescan_files()
             }
             Err(err) => {
                 self.view
@@ -712,4 +732,11 @@ fn apply_focus_with_view(view: &ViewState, focus: &Focus, model: &mut AppModel) 
     if let Some(loaded) = view.resolve_request(id) {
         model.load_draft(loaded);
     }
+}
+
+fn headers_contain_name(headers: &str, name: &str) -> bool {
+    headers
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .any(|(header_name, _)| header_name.trim().eq_ignore_ascii_case(name))
 }
