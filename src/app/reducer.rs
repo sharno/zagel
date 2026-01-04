@@ -45,7 +45,6 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub enum Effect {
-    RescanFiles,
     SendRequest {
         draft: RequestDraft,
         env: Option<Environment>,

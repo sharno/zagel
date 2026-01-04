@@ -519,7 +519,6 @@ impl Zagel {
         let tasks: Vec<Task<Message>> = effects
             .into_iter()
             .map(|effect| match effect {
-                Effect::RescanFiles => self.rescan_files(),
                 Effect::SendRequest { draft, env } => Task::perform(
                     send_request(self.runtime.client.clone(), draft, env),
                     Message::ResponseReady,

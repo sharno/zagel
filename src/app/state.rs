@@ -263,9 +263,7 @@ impl ViewState {
     }
 
     pub fn resolve_request(&self, id: &RequestId) -> Option<LoadedDraft> {
-        let RequestId::HttpFile { path, index } = id else {
-            return None;
-        };
+        let RequestId::HttpFile { path, index } = id;
         let draft = self
             .http_files
             .get(path)
