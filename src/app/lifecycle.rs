@@ -242,9 +242,31 @@ impl Zagel {
             .as_ref()
             .and_then(|resp| resp.error.clone().or_else(|| resp.body.clone()))
             .unwrap_or_else(|| "No response yet".to_string());
-        let display_text = match (self.response_display, super::view::pretty_json(&body_text)) {
-            (super::view::ResponseDisplay::Pretty, Some(pretty)) => pretty,
-            _ => body_text,
+        
+        // Check if response is HTML
+        let is_html = self
+            .last_response
+            .as_ref()
+            .and_then(|resp| {
+                resp.headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, value)| value.to_ascii_lowercase().contains("html"))
+            })
+            .unwrap_or(false);
+        
+        let display_text = match self.response_display {
+            super::view::ResponseDisplay::Pretty => {
+                // Try JSON first, then HTML
+                if let Some(pretty) = super::view::pretty_json(&body_text) {
+                    pretty
+                } else if is_html {
+                    super::view::pretty_html(&body_text).unwrap_or(body_text)
+                } else {
+                    body_text
+                }
+            }
+            super::view::ResponseDisplay::Raw => body_text,
         };
         self.response_viewer = iced::widget::text_editor::Content::with_text(&display_text);
     }

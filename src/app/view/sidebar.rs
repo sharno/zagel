@@ -10,6 +10,45 @@ use crate::model::{HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 10;
 
+// Icon constants for better consistency and easier customization
+mod icons {
+    // Expand/collapse chevrons - using thinner, more modern chevrons
+    pub const COLLAPSED: &str = "▸";  // Right-pointing chevron (collapsed)
+    pub const EXPANDED: &str = "▾";   // Down-pointing chevron (expanded)
+    
+    // Alternative options (uncomment to try):
+    // pub const COLLAPSED: &str = "▶";  // Triangle right
+    // pub const EXPANDED: &str = "▼";   // Triangle down
+    // pub const COLLAPSED: &str = "▷";  // White triangle right
+    // pub const EXPANDED: &str = "▽";   // White triangle down
+    
+    // Checkboxes
+    pub const CHECKED: &str = "☑";    // Checked box
+    pub const UNCHECKED: &str = "☐";  // Unchecked box
+    
+    // Alternative checkbox options:
+    // pub const CHECKED: &str = "✓";    // Checkmark
+    // pub const UNCHECKED: &str = "☐";  // Empty box
+    // pub const CHECKED: &str = "☒";    // X in box
+    
+    // Move buttons
+    pub const MOVE_UP: &str = "↑";    // Up arrow
+    pub const MOVE_DOWN: &str = "↓";  // Down arrow
+    
+    // Alternative move button options:
+    // pub const MOVE_UP: &str = "▲";    // Triangle up
+    // pub const MOVE_DOWN: &str = "▼";  // Triangle down
+    // pub const MOVE_UP: &str = "⏶";    // Up caret
+    // pub const MOVE_DOWN: &str = "⏷";  // Down caret
+    
+    // Selected item indicator
+    pub const SELECTED: &str = "→";   // Right arrow (selected)
+    
+    // Alternative selected indicators:
+    // pub const SELECTED: &str = "▸";   // Chevron right
+    // pub const SELECTED: &str = "●";   // Bullet point
+}
+
 #[derive(Clone, Copy)]
 pub struct SidebarContext<'a> {
     pub http_files: &'a HashMap<PathBuf, HttpFile>,
@@ -169,10 +208,10 @@ fn render_tree<'a>(
             format!("{path}/{}", child.name)
         };
         let is_collapsed = ctx.collapsed.contains(&full_path);
-        let toggle_label = if is_collapsed { "▶" } else { "▼" };
+        let toggle_label = if is_collapsed { icons::COLLAPSED } else { icons::EXPANDED };
         let toggle = button(text(toggle_label))
             .style(button::secondary)
-            .padding(2)
+            .padding([2, 4])  // More horizontal padding for better click target
             .on_press(Message::ToggleCollection(full_path.clone()));
 
         let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
@@ -185,16 +224,17 @@ fn render_tree<'a>(
         {
             let target = EditTarget::Collection(collection_path.clone());
             let selected = edit_selection.contains(&target);
-            let label = if selected { "[x]" } else { "[ ]" };
+            let label = if selected { icons::CHECKED } else { icons::UNCHECKED };
             row_widgets = row_widgets
-                .push(button(text(label)).on_press(Message::ToggleEditSelection(
-                    target)))
-                .push(button(text("^")).on_press(Message::MoveCollectionUp(
-                    collection_path.clone(),
-                )))
-                .push(button(text("v")).on_press(Message::MoveCollectionDown(
-                    collection_path,
-                )));
+                .push(button(text(label))
+                    .padding([2, 4])
+                    .on_press(Message::ToggleEditSelection(target)))
+                .push(button(text(icons::MOVE_UP))
+                    .padding([2, 4])
+                    .on_press(Message::MoveCollectionUp(collection_path.clone())))
+                .push(button(text(icons::MOVE_DOWN))
+                    .padding([2, 4])
+                    .on_press(Message::MoveCollectionDown(collection_path)));
         }
 
         if let Some(file_path) = &child.node.file_path {
@@ -231,7 +271,7 @@ fn render_tree<'a>(
         for item in &node.requests {
             let is_selected = ctx.selection.is_some_and(|s| *s == item.id);
             let label = if is_selected {
-                format!("▶ {} • {}", item.draft.method, item.draft.title)
+                format!("{} {} • {}", icons::SELECTED, item.draft.method, item.draft.title)
             } else {
                 format!("{} • {}", item.draft.method, item.draft.title)
             };
@@ -240,11 +280,17 @@ fn render_tree<'a>(
             if ctx.editing && let Some(edit_selection) = ctx.edit_selection {
                 let target = EditTarget::Request(item.id.clone());
                 let selected = edit_selection.contains(&target);
-                let select_label = if selected { "[x]" } else { "[ ]" };
+                let select_label = if selected { icons::CHECKED } else { icons::UNCHECKED };
                 row_widgets = row_widgets
-                    .push(button(text(select_label)).on_press(Message::ToggleEditSelection(target)))
-                    .push(button(text("^")).on_press(Message::MoveRequestUp(item.id.clone())))
-                    .push(button(text("v")).on_press(Message::MoveRequestDown(item.id.clone())));
+                    .push(button(text(select_label))
+                        .padding([2, 4])
+                        .on_press(Message::ToggleEditSelection(target)))
+                    .push(button(text(icons::MOVE_UP))
+                        .padding([2, 4])
+                        .on_press(Message::MoveRequestUp(item.id.clone())))
+                    .push(button(text(icons::MOVE_DOWN))
+                        .padding([2, 4])
+                        .on_press(Message::MoveRequestDown(item.id.clone())));
             }
             row_widgets = row_widgets.push(
                 button(text(label))

@@ -184,7 +184,7 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 fn builder_body(app: &Zagel) -> Element<'_, Message> {
     let body_title = match app.mode {
         RequestMode::GraphQl => "GraphQL",
-        RequestMode::Rest => "Body",
+        RequestMode::Rest => "REST",
     };
 
     let body_panel: Element<'_, Message> = match app.mode {

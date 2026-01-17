@@ -11,7 +11,7 @@ use super::{Message, Zagel};
 use sidebar::{SidebarContext, sidebar};
 use workspace::workspace;
 
-pub use response::{ResponseDisplay, ResponseTab, pretty_json};
+pub use response::{ResponseDisplay, ResponseTab, pretty_json, pretty_html};
 pub use workspace::{BuilderPane, WorkspacePane};
 
 #[derive(Debug, Clone, Copy)]
