@@ -2,7 +2,8 @@ use iced::widget::text::Wrapping;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_editor};
 use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
-use regex::Regex;
+use scraper::{Html, Node};
+use ego_tree::NodeRef;
 
 use super::super::Message;
 use crate::model::ResponsePreview;
@@ -104,7 +105,7 @@ pub fn response_panel<'a>(
 
             let is_html = response_syntax(resp) == "html";
             let body_is_pretty_json = pretty_json(&body_text).is_some();
-            let body_is_pretty_html = is_html && pretty_html(&body_text).is_some();
+            let body_is_pretty_html = is_html && !pretty_html(&body_text).is_empty();
             let body_is_pretty = body_is_pretty_json || body_is_pretty_html;
             let syntax = response_syntax(resp);
             let body_editor = text_editor(content)
@@ -163,14 +164,17 @@ pub fn pretty_json(raw: &str) -> Option<String> {
         .map(|v| serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw.to_string()))
 }
 
-/// Formats HTML with proper indentation using regex-based formatting.
-/// Handles malformed HTML gracefully by auto-closing implicit tags and maintaining proper indentation.
-/// Returns None if the HTML appears invalid, otherwise returns formatted HTML.
-pub fn pretty_html(raw: &str) -> Option<String> {
+/// Formats HTML with proper indentation using a proper HTML parser.
+/// Handles malformed HTML gracefully by using scraper's robust parsing (built on html5ever).
+/// Always returns formatted HTML (scraper handles malformed HTML gracefully).
+pub fn pretty_html(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Some(String::new());
+        return String::new();
     }
+
+    // Parse HTML using scraper (which uses html5ever internally)
+    let document = Html::parse_document(trimmed);
 
     // List of void/self-closing tags that don't need closing tags
     let void_tags: std::collections::HashSet<&str> = [
@@ -180,139 +184,135 @@ pub fn pretty_html(raw: &str) -> Option<String> {
     .into_iter()
     .collect();
 
-    // Tags that implicitly close certain other tags when they appear
-    // For example, <body> implicitly closes <head>
-    let implicit_closers: std::collections::HashMap<&str, Vec<&str>> = [
-        ("body", vec!["head"]),
-        ("head", vec!["head"]), // New <head> closes previous <head>
-        ("html", vec!["head", "body"]),
-    ]
-    .into_iter()
-    .collect();
-
-    // Regex pattern to match HTML tags
-    let tag_re = Regex::new(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)>").ok()?;
-    let doctype_re = Regex::new(r"<!DOCTYPE[^>]*>").ok()?;
-
+    // Format the DOM tree with proper indentation
     let mut result = String::new();
-    let mut indent_level = 0;
+    format_node(document.tree.root(), &mut result, 0, &void_tags);
+
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+fn format_node(node: NodeRef<'_, Node>, output: &mut String, indent: usize, void_tags: &std::collections::HashSet<&str>) {
     const INDENT_SIZE: usize = 2;
+    let indent_str = " ".repeat(indent * INDENT_SIZE);
 
-    // Extract and preserve DOCTYPE
-    let mut processed = trimmed.to_string();
-    if let Some(dt_match) = doctype_re.find(trimmed) {
-        let dt = dt_match.as_str();
-        result.push_str(dt);
-        result.push('\n');
-        processed = processed.replace(dt, "");
-    }
-
-    // Process tags
-    let mut last_end = 0;
-    let mut tag_stack: Vec<String> = Vec::new();
-
-    for cap in tag_re.captures_iter(&processed) {
-        let full_match = cap.get(0)?;
-        let is_closing = !cap.get(1)?.as_str().is_empty();
-        let tag_name = cap.get(2)?.as_str().to_lowercase();
-        let has_self_close = !cap.get(3)?.as_str().is_empty();
-        let is_void = void_tags.contains(tag_name.as_str());
-        let is_self_closing = has_self_close || is_void;
-
-        // Add text content before this tag
-        let text_before = &processed[last_end..full_match.start()];
-        let trimmed_text = text_before.trim();
-        if !trimmed_text.is_empty() {
-            if !result.ends_with('\n') && !result.is_empty() {
-                result.push('\n');
+    match node.value() {
+        Node::Document => {
+            // Process children of document
+            for child in node.children() {
+                format_node(child, output, indent, void_tags);
             }
-            result.push_str(&" ".repeat(indent_level * INDENT_SIZE));
-            result.push_str(trimmed_text);
         }
-
-        if is_closing {
-            // Closing tag - find and close matching tag in stack
-            // Close all tags until we find the matching one
-            while let Some(last_tag) = tag_stack.last() {
-                if last_tag == &tag_name {
-                    tag_stack.pop();
-                    indent_level = indent_level.saturating_sub(1);
-                    break;
+        Node::Doctype(doctype) => {
+            output.push_str("<!DOCTYPE ");
+            output.push_str(&doctype.name);
+            let pid_empty = doctype.public_id.is_empty();
+            let sid_empty = doctype.system_id.is_empty();
+            if !pid_empty {
+                output.push_str(" PUBLIC \"");
+                output.push_str(&doctype.public_id);
+                output.push('"');
+            }
+            if !sid_empty {
+                if pid_empty {
+                    output.push_str(" SYSTEM \"");
                 } else {
-                    // Implicitly close mismatched tags
-                    tag_stack.pop();
-                    indent_level = indent_level.saturating_sub(1);
+                    output.push_str(" \"");
+                }
+                output.push_str(&doctype.system_id);
+                output.push('"');
+            }
+            output.push_str(">\n");
+        }
+        Node::Text(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                // Only add newline if we're not already at the start of a line
+                if !output.ends_with('\n') && !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&indent_str);
+                output.push_str(trimmed);
+            }
+        }
+        Node::Element(element) => {
+            let tag_name = element.name.local.as_ref();
+            let is_void = void_tags.contains(tag_name);
+
+            // Add newline before opening tag
+            if !output.ends_with('\n') && !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&indent_str);
+            output.push('<');
+            output.push_str(tag_name);
+
+            // Add attributes
+            for (attr_name, attr_value) in &element.attrs {
+                output.push(' ');
+                output.push_str(attr_name.local.as_ref());
+                output.push_str("=\"");
+                // Escape quotes in attribute values
+                let value = attr_value.replace('"', "&quot;");
+                output.push_str(&value);
+                output.push('"');
+            }
+
+            if is_void {
+                output.push_str(" />");
+            } else {
+                output.push('>');
+            }
+
+            // Process children
+            let children: Vec<_> = node.children().collect();
+            let has_text_children = children.iter().any(|child| matches!(child.value(), Node::Text(_)));
+            let has_element_children = children.iter().any(|child| matches!(child.value(), Node::Element(_)));
+
+            // Only add newlines and indentation if there are element children or mixed content
+            let should_indent = has_element_children || (has_text_children && children.len() > 1);
+
+            for child in children {
+                if should_indent {
+                    format_node(child, output, indent + 1, void_tags);
+                } else {
+                    // Inline formatting for text-only content
+                    format_node(child, output, 0, void_tags);
                 }
             }
-            
-            if !result.ends_with('\n') && !result.is_empty() {
-                result.push('\n');
-            }
-            result.push_str(&" ".repeat(indent_level * INDENT_SIZE));
-            result.push_str(full_match.as_str());
-        } else if is_self_closing {
-            // Self-closing tag
-            if !result.ends_with('\n') && !result.is_empty() {
-                result.push('\n');
-            }
-            result.push_str(&" ".repeat(indent_level * INDENT_SIZE));
-            result.push_str(full_match.as_str());
-        } else {
-            // Opening tag - check for implicit closers
-            if let Some(tags_to_close) = implicit_closers.get(tag_name.as_str()) {
-                // Close any tags that should be implicitly closed
-                while let Some(last_tag) = tag_stack.last() {
-                    if tags_to_close.iter().any(|&tag| tag == last_tag.as_str()) {
-                        tag_stack.pop();
-                        indent_level = indent_level.saturating_sub(1);
-                    } else {
-                        break;
-                    }
+
+            // Closing tag
+            if !is_void {
+                if should_indent && !output.ends_with('\n') {
+                    output.push('\n');
                 }
+                if should_indent {
+                    output.push_str(&indent_str);
+                }
+                output.push_str("</");
+                output.push_str(tag_name);
+                output.push('>');
             }
-            
-            if !result.ends_with('\n') && !result.is_empty() {
-                result.push('\n');
-            }
-            result.push_str(&" ".repeat(indent_level * INDENT_SIZE));
-            result.push_str(full_match.as_str());
-            tag_stack.push(tag_name);
-            indent_level += 1;
         }
-
-        last_end = full_match.end();
-    }
-
-    // Add any remaining text
-    let remaining = &processed[last_end..];
-    let trimmed_remaining = remaining.trim();
-    if !trimmed_remaining.is_empty() {
-        if !result.ends_with('\n') && !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str(&" ".repeat(indent_level * INDENT_SIZE));
-        result.push_str(trimmed_remaining);
-    }
-
-    // Clean up: remove excessive blank lines
-    let lines: Vec<&str> = result.lines().collect();
-    let mut formatted = Vec::new();
-    let mut prev_empty = false;
-
-    for line in lines {
-        let trimmed_line = line.trim();
-        if trimmed_line.is_empty() {
-            if !prev_empty && !formatted.is_empty() {
-                formatted.push(String::new());
+        Node::Comment(comment) => {
+            if !output.ends_with('\n') && !output.is_empty() {
+                output.push('\n');
             }
-            prev_empty = true;
-        } else {
-            formatted.push(line.to_string());
-            prev_empty = false;
+            output.push_str(&indent_str);
+            output.push_str("<!--");
+            output.push_str(comment);
+            output.push_str("-->");
+        }
+        Node::Fragment => {
+            // Fragment nodes are containers, process children
+            for child in node.children() {
+                format_node(child, output, indent, void_tags);
+            }
+        }
+        Node::ProcessingInstruction(_) => {
+            // Processing instructions are rare, skip for now
         }
     }
-
-    Some(formatted.join("\n"))
 }
 
 fn response_syntax(resp: &ResponsePreview) -> &'static str {

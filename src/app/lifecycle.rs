@@ -258,13 +258,16 @@ impl Zagel {
         let display_text = match self.response_display {
             super::view::ResponseDisplay::Pretty => {
                 // Try JSON first, then HTML
-                if let Some(pretty) = super::view::pretty_json(&body_text) {
-                    pretty
-                } else if is_html {
-                    super::view::pretty_html(&body_text).unwrap_or(body_text)
-                } else {
-                    body_text
-                }
+                super::view::pretty_json(&body_text).map_or_else(
+                    || {
+                        if is_html {
+                            super::view::pretty_html(&body_text)
+                        } else {
+                            body_text
+                        }
+                    },
+                    |pretty| pretty,
+                )
             }
             super::view::ResponseDisplay::Raw => body_text,
         };
