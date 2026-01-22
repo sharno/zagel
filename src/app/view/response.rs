@@ -4,6 +4,8 @@ use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 use scraper::{Html, Node};
 use ego_tree::NodeRef;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 use super::super::Message;
 use crate::model::ResponsePreview;
@@ -42,6 +44,7 @@ impl std::fmt::Display for ResponseTab {
     }
 }
 
+/// Creates a toggle widget for switching between Body and Headers tabs in the response view.
 pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
     let body = button(text("Body"))
         .style(if current == ResponseTab::Body {
@@ -61,6 +64,7 @@ pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
     row![body, headers].spacing(6).into()
 }
 
+/// Creates a pick list widget for switching between Raw and Pretty response display modes.
 pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Message> {
     pick_list(
         ResponseDisplay::ALL.to_vec(),
@@ -70,6 +74,11 @@ pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Messag
     .into()
 }
 
+/// Creates the main response panel UI element.
+/// 
+/// Displays the HTTP response status, duration, and either the body or headers
+/// based on the selected tab. Supports both raw and pretty-printed views for
+/// JSON and HTML content.
 pub fn response_panel<'a>(
     response: Option<&ResponsePreview>,
     content: &'a text_editor::Content,
@@ -105,7 +114,14 @@ pub fn response_panel<'a>(
 
             let is_html = response_syntax(resp) == "html";
             let body_is_pretty_json = pretty_json(&body_text).is_some();
-            let body_is_pretty_html = is_html && !pretty_html(&body_text).is_empty();
+            // Check if HTML formatting would actually change the content
+            // We check if formatting produces different output (meaning it worked)
+            let body_is_pretty_html = if is_html {
+                let formatted = pretty_html(&body_text);
+                formatted != body_text.trim() && !formatted.is_empty()
+            } else {
+                false
+            };
             let body_is_pretty = body_is_pretty_json || body_is_pretty_html;
             let syntax = response_syntax(resp);
             let body_editor = text_editor(content)
@@ -158,22 +174,29 @@ pub fn response_panel<'a>(
     )
 }
 
+/// Attempts to format a JSON string with proper indentation.
+/// 
+/// Returns `Some(formatted_json)` if the input is valid JSON, otherwise returns `None`.
 pub fn pretty_json(raw: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(raw)
         .ok()
         .map(|v| serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw.to_string()))
 }
 
-/// Formats HTML with proper indentation using a proper HTML parser.
-/// Handles malformed HTML gracefully by using scraper's robust parsing (built on html5ever).
-/// Always returns formatted HTML (scraper handles malformed HTML gracefully).
+/// Formats HTML with proper indentation using scraper (html5ever).
+/// Handles malformed HTML gracefully by using html5ever's robust parsing.
 pub fn pretty_html(raw: &str) -> String {
+    // #region agent log
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+        let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A","location":"response.rs:175","message":"pretty_html entry","data":{{"input_len":{},"input_preview":"{}"}},"timestamp":{}}}"#, raw.len(), raw.chars().take(100).collect::<String>().replace('"', "\\\""), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    }
+    // #endregion
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
-    // Parse HTML using scraper (which uses html5ever internally)
+    // Parse HTML using scraper (which uses html5ever internally - very lenient)
     let document = Html::parse_document(trimmed);
 
     // List of void/self-closing tags that don't need closing tags
@@ -186,21 +209,40 @@ pub fn pretty_html(raw: &str) -> String {
 
     // Format the DOM tree with proper indentation
     let mut result = String::new();
-    format_node(document.tree.root(), &mut result, 0, &void_tags);
+    format_node(document.tree.root(), &mut result, 0, &void_tags, false, false);
 
+    // #region agent log
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+        let changed = result != trimmed;
+        let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A","location":"response.rs:207","message":"pretty_html exit","data":{{"result_len":{},"changed":{},"result_preview":"{}"}},"timestamp":{}}}"#, result.len(), changed, result.chars().take(200).collect::<String>().replace('"', "\\\"").replace('\n', "\\n"), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    }
+    // #endregion
     result
 }
 
+/// Recursively formats an HTML node tree with proper indentation.
+/// 
+/// Preserves text content verbatim, especially within preformatted tags (pre, code, etc.).
+/// Only adds newlines and indentation when `should_indent` is true to avoid
+/// forcing formatting on inline-only content.
 #[allow(clippy::too_many_lines)]
-fn format_node(node: NodeRef<'_, Node>, output: &mut String, indent: usize, void_tags: &std::collections::HashSet<&str>) {
+fn format_node(
+    node: NodeRef<'_, Node>,
+    output: &mut String,
+    indent: usize,
+    void_tags: &std::collections::HashSet<&str>,
+    in_preformatted: bool,
+    should_indent: bool,
+) {
+    // Tags that preserve whitespace and should not have their content modified
+    const PREFORMATTED_TAGS: &[&str] = &["pre", "code", "textarea", "script", "style"];
     const INDENT_SIZE: usize = 2;
     let indent_str = " ".repeat(indent * INDENT_SIZE);
 
     match node.value() {
-        Node::Document => {
-            // Process children of document
+        Node::Document | Node::Fragment => {
             for child in node.children() {
-                format_node(child, output, indent, void_tags);
+                format_node(child, output, indent, void_tags, in_preformatted, should_indent);
             }
         }
         Node::Doctype(doctype) => {
@@ -225,35 +267,49 @@ fn format_node(node: NodeRef<'_, Node>, output: &mut String, indent: usize, void
             output.push_str(">\n");
         }
         Node::Text(text) => {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                // Only add newline if we're not already at the start of a line
-                if !output.ends_with('\n') && !output.is_empty() {
-                    output.push('\n');
+            // In preformatted context, preserve text verbatim
+            if in_preformatted {
+                output.push_str(text);
+            } else {
+                // Outside preformatted context, skip purely whitespace nodes
+                if !text.trim().is_empty() {
+                    // Only add newline/indentation when should_indent is true
+                    // and we're starting a new indented line
+                    if should_indent && !output.ends_with('\n') && !output.is_empty() {
+                        output.push('\n');
+                        output.push_str(&indent_str);
+                    }
+                    // Preserve the text content verbatim (don't trim)
+                    output.push_str(text);
                 }
-                output.push_str(&indent_str);
-                output.push_str(trimmed);
             }
         }
         Node::Element(element) => {
             let tag_name = element.name.local.as_ref();
             let is_void = void_tags.contains(tag_name);
+            let tag_is_preformatted = PREFORMATTED_TAGS.contains(&tag_name);
 
-            // Add newline before opening tag
-            if !output.ends_with('\n') && !output.is_empty() {
+            // Only add newline before opening tag if we're in an indented context
+            if should_indent && !output.ends_with('\n') && !output.is_empty() {
                 output.push('\n');
             }
-            output.push_str(&indent_str);
+            if should_indent {
+                output.push_str(&indent_str);
+            }
             output.push('<');
             output.push_str(tag_name);
 
-            // Add attributes
+            // Escape attribute values properly
             for (attr_name, attr_value) in &element.attrs {
                 output.push(' ');
                 output.push_str(attr_name.local.as_ref());
                 output.push_str("=\"");
-                // Escape quotes in attribute values
-                let value = attr_value.replace('"', "&quot;");
+                // Escape <, >, ", and & (in that order, so & is last to avoid double-escaping)
+                let value = attr_value
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+                    .replace('"', "&quot;")
+                    .replace('&', "&amp;");
                 output.push_str(&value);
                 output.push('"');
             }
@@ -264,29 +320,29 @@ fn format_node(node: NodeRef<'_, Node>, output: &mut String, indent: usize, void
                 output.push('>');
             }
 
-            // Process children
             let children: Vec<_> = node.children().collect();
             let has_text_children = children.iter().any(|child| matches!(child.value(), Node::Text(_)));
             let has_element_children = children.iter().any(|child| matches!(child.value(), Node::Element(_)));
+            let child_should_indent = has_element_children || (has_text_children && children.len() > 1);
 
-            // Only add newlines and indentation if there are element children or mixed content
-            let should_indent = has_element_children || (has_text_children && children.len() > 1);
+            // Determine if children are in preformatted context
+            let child_in_preformatted = in_preformatted || tag_is_preformatted;
 
             for child in children {
-                if should_indent {
-                    format_node(child, output, indent + 1, void_tags);
+                if child_should_indent {
+                    format_node(child, output, indent + 1, void_tags, child_in_preformatted, child_should_indent);
                 } else {
-                    // Inline formatting for text-only content
-                    format_node(child, output, 0, void_tags);
+                    // For inline formatting, pass 0 indent but preserve preformatted context
+                    format_node(child, output, 0, void_tags, child_in_preformatted, child_should_indent);
                 }
             }
 
-            // Closing tag
             if !is_void {
-                if should_indent && !output.ends_with('\n') {
+                // Only add newline before closing tag if we're in an indented context
+                if child_should_indent && !output.ends_with('\n') {
                     output.push('\n');
                 }
-                if should_indent {
+                if child_should_indent {
                     output.push_str(&indent_str);
                 }
                 output.push_str("</");
@@ -295,26 +351,23 @@ fn format_node(node: NodeRef<'_, Node>, output: &mut String, indent: usize, void
             }
         }
         Node::Comment(comment) => {
-            if !output.ends_with('\n') && !output.is_empty() {
+            if should_indent && !output.ends_with('\n') && !output.is_empty() {
                 output.push('\n');
             }
-            output.push_str(&indent_str);
+            if should_indent {
+                output.push_str(&indent_str);
+            }
             output.push_str("<!--");
             output.push_str(comment);
             output.push_str("-->");
         }
-        Node::Fragment => {
-            // Fragment nodes are containers, process children
-            for child in node.children() {
-                format_node(child, output, indent, void_tags);
-            }
-        }
-        Node::ProcessingInstruction(_) => {
-            // Processing instructions are rare, skip for now
-        }
+        Node::ProcessingInstruction(_) => {}
     }
 }
 
+/// Determines the syntax highlighting language based on the response's Content-Type header.
+/// 
+/// Returns one of: "json", "html", "xml", "javascript", "css", or "text" (default).
 fn response_syntax(resp: &ResponsePreview) -> &'static str {
     let content_type = resp
         .headers

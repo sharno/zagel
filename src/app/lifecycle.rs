@@ -237,11 +237,21 @@ impl Zagel {
     }
 
     pub(super) fn update_response_viewer(&mut self) {
+        // #region agent log
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        // #endregion
         let body_text = self
             .last_response
             .as_ref()
             .and_then(|resp| resp.error.clone().or_else(|| resp.body.clone()))
             .unwrap_or_else(|| "No response yet".to_string());
+        
+        // #region agent log
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+            let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"lifecycle.rs:240","message":"update_response_viewer entry","data":{{"body_text_len":{},"body_text_preview":"{}"}},"timestamp":{}}}"#, body_text.len(), body_text.chars().take(100).collect::<String>().replace('"', "\\\""), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+        }
+        // #endregion
         
         // Check if response is HTML
         let is_html = self
@@ -255,13 +265,34 @@ impl Zagel {
             })
             .unwrap_or(false);
         
+        // #region agent log
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+            let content_type = self.last_response.as_ref().and_then(|resp| {
+                resp.headers.iter().find(|(name, _)| name.eq_ignore_ascii_case("content-type")).map(|(_, v)| v.clone())
+            }).unwrap_or_default();
+            let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"lifecycle.rs:256","message":"HTML detection","data":{{"is_html":{},"content_type":"{}"}},"timestamp":{}}}"#, is_html, content_type, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+        }
+        // #endregion
+        
         let display_text = match self.response_display {
             super::view::ResponseDisplay::Pretty => {
                 // Try JSON first, then HTML
-                super::view::pretty_json(&body_text).map_or_else(
+                let json_result = super::view::pretty_json(&body_text);
+                // #region agent log
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+                    let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"lifecycle.rs:261","message":"JSON format check","data":{{"json_success":{}}},"timestamp":{}}}"#, json_result.is_some(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                }
+                // #endregion
+                json_result.map_or_else(
                     || {
                         if is_html {
-                            super::view::pretty_html(&body_text)
+                            let html_formatted = super::view::pretty_html(&body_text);
+                            // #region agent log
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+                                let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"lifecycle.rs:264","message":"HTML formatting applied","data":{{"formatted_len":{},"formatted_preview":"{}"}},"timestamp":{}}}"#, html_formatted.len(), html_formatted.chars().take(200).collect::<String>().replace('"', "\\\"").replace('\n', "\\n"), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                            }
+                            // #endregion
+                            html_formatted
                         } else {
                             body_text
                         }
@@ -271,6 +302,15 @@ impl Zagel {
             }
             super::view::ResponseDisplay::Raw => body_text,
         };
+        
+        // #region agent log
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
+            let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"lifecycle.rs:274","message":"Setting response_viewer content","data":{{"display_text_len":{},"display_text_preview":"{}"}},"timestamp":{}}}"#, display_text.len(), display_text.chars().take(200).collect::<String>().replace('"', "\\\"").replace('\n', "\\n"), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+        }
+        // #endregion
+        
+        // Recreate Content with new text
+        // Highlighting is re-applied in response_panel via .highlight(syntax, highlight_theme)
         self.response_viewer = iced::widget::text_editor::Content::with_text(&display_text);
     }
 
