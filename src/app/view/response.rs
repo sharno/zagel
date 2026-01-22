@@ -4,8 +4,6 @@ use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 use scraper::{Html, Node};
 use ego_tree::NodeRef;
-use std::fs::OpenOptions;
-use std::io::Write;
 
 use super::super::Message;
 use crate::model::ResponsePreview;
@@ -186,11 +184,6 @@ pub fn pretty_json(raw: &str) -> Option<String> {
 /// Formats HTML with proper indentation using scraper (html5ever).
 /// Handles malformed HTML gracefully by using html5ever's robust parsing.
 pub fn pretty_html(raw: &str) -> String {
-    // #region agent log
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
-        let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A","location":"response.rs:175","message":"pretty_html entry","data":{{"input_len":{},"input_preview":"{}"}},"timestamp":{}}}"#, raw.len(), raw.chars().take(100).collect::<String>().replace('"', "\\\""), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
-    }
-    // #endregion
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -211,12 +204,6 @@ pub fn pretty_html(raw: &str) -> String {
     let mut result = String::new();
     format_node(document.tree.root(), &mut result, 0, &void_tags, false, false);
 
-    // #region agent log
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(r"e:\Projects\zagel\.cursor\debug.log") {
-        let changed = result != trimmed;
-        let _ = writeln!(file, r#"{{"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A","location":"response.rs:207","message":"pretty_html exit","data":{{"result_len":{},"changed":{},"result_preview":"{}"}},"timestamp":{}}}"#, result.len(), changed, result.chars().take(200).collect::<String>().replace('"', "\\\"").replace('\n', "\\n"), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
-    }
-    // #endregion
     result
 }
 
@@ -304,12 +291,12 @@ fn format_node(
                 output.push(' ');
                 output.push_str(attr_name.local.as_ref());
                 output.push_str("=\"");
-                // Escape <, >, ", and & (in that order, so & is last to avoid double-escaping)
+                // Escape & first, then <, >, and " to avoid double-escaping
                 let value = attr_value
+                    .replace('&', "&amp;")
                     .replace('<', "&lt;")
                     .replace('>', "&gt;")
-                    .replace('"', "&quot;")
-                    .replace('&', "&amp;");
+                    .replace('"', "&quot;");
                 output.push_str(&value);
                 output.push('"');
             }
