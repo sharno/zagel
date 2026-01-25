@@ -6,7 +6,7 @@ use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application};
 use reqwest::Client;
 
-use crate::model::{Environment, HttpFile, RequestDraft, RequestId, ResponsePreview};
+use crate::model::{Environment, HttpFile, RequestDraft, RequestId};
 use crate::parser::{scan_env_files, scan_http_files};
 use crate::state::AppState;
 
@@ -37,7 +37,7 @@ pub struct Zagel {
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
-    pub(super) last_response: Option<ResponsePreview>,
+    pub(super) response: Option<crate::app::view::ResponseData>,
     pub(super) environments: Vec<Environment>,
     pub(super) active_environment: usize,
     pub(super) http_root: PathBuf,
@@ -52,6 +52,7 @@ pub struct Zagel {
     pub(super) header_rows: Vec<HeaderRow>,
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
+    pub(super) icon_set: crate::app::view::IconSet,
     pub(super) show_shortcuts: bool,
     pub(super) pending_rescan: bool,
     pub(super) last_scan: Option<Instant>,
@@ -106,7 +107,7 @@ impl Zagel {
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: "Ready".to_string(),
-            last_response: None,
+            response: None,
             environments: vec![default_environment()],
             active_environment: 0,
             http_root,
@@ -121,6 +122,7 @@ impl Zagel {
             header_rows: Vec::new(),
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
+            icon_set: crate::app::view::IconSet::from_env(),
             show_shortcuts: false,
             pending_rescan: false,
             last_scan: None,
@@ -237,15 +239,16 @@ impl Zagel {
     }
 
     pub(super) fn update_response_viewer(&mut self) {
-        let body_text = self
-            .last_response
-            .as_ref()
-            .and_then(|resp| resp.error.clone().or_else(|| resp.body.clone()))
-            .unwrap_or_else(|| "No response yet".to_string());
-        let display_text = match (self.response_display, super::view::pretty_json(&body_text)) {
-            (super::view::ResponseDisplay::Pretty, Some(pretty)) => pretty,
-            _ => body_text,
+        let display_text = match (self.response_display, self.response.as_ref()) {
+            (super::view::ResponseDisplay::Pretty, Some(response)) => response
+                .body
+                .pretty_text()
+                .unwrap_or_else(|| response.body.raw())
+                .to_string(),
+            (_, Some(response)) => response.body.raw().to_string(),
+            (_, None) => "No response yet".to_string(),
         };
+
         self.response_viewer = iced::widget::text_editor::Content::with_text(&display_text);
     }
 

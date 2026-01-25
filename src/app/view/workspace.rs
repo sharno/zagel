@@ -184,7 +184,7 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 fn builder_body(app: &Zagel) -> Element<'_, Message> {
     let body_title = match app.mode {
         RequestMode::GraphQl => "GraphQL",
-        RequestMode::Rest => "Body",
+        RequestMode::Rest => "REST",
     };
 
     let body_panel: Element<'_, Message> = match app.mode {
@@ -235,11 +235,20 @@ fn response(app: &Zagel) -> Element<'_, Message> {
     .spacing(8);
 
     if matches!(app.response_tab, super::response::ResponseTab::Body) {
-        status_row = status_row.push(button("Copy body").on_press(Message::CopyResponseBody));
+        status_row = status_row.push(button("Copy raw").on_press(Message::CopyResponseRaw));
+        if app.response_display == super::response::ResponseDisplay::Pretty
+            && app
+                .response
+                .as_ref()
+                .and_then(|response| response.body.pretty_text())
+                .is_some()
+        {
+            status_row = status_row.push(button("Copy pretty").on_press(Message::CopyResponsePretty));
+        }
     }
 
     let response_view = response_panel(
-        app.last_response.as_ref(),
+        app.response.as_ref(),
         &app.response_viewer,
         app.response_display,
         app.response_tab,
