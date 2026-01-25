@@ -457,8 +457,22 @@ impl Zagel {
                 self.show_shortcuts = !self.show_shortcuts;
                 Task::none()
             }
-            Message::CopyResponseBody => {
-                clipboard::write(self.response_viewer.text()).map(|()| Message::CopyComplete)
+            Message::CopyResponseRaw => {
+                let text = self.response.as_ref().map_or_else(
+                    || self.response_viewer.text(),
+                    |response| response.body.raw().to_string(),
+                );
+                clipboard::write(text).map(|()| Message::CopyComplete)
+            }
+            Message::CopyResponsePretty => {
+                let Some(text) = self
+                    .response
+                    .as_ref()
+                    .and_then(|response| response.body.pretty_text())
+                else {
+                    return Task::none();
+                };
+                clipboard::write(text.to_string()).map(|()| Message::CopyComplete)
             }
             Message::CopyComplete => Task::none(),
             Message::AddRequest => {
@@ -521,11 +535,13 @@ impl Zagel {
                 match result {
                     Ok(resp) => {
                         self.update_status_with_missing("Received response");
-                        self.last_response = Some(resp);
+                        self.response = Some(crate::app::view::ResponseData::from_preview(resp));
                     }
                     Err(err) => {
                         self.update_status_with_missing("Request failed");
-                        self.last_response = Some(ResponsePreview::error(err));
+                        self.response = Some(crate::app::view::ResponseData::from_preview(
+                            ResponsePreview::error(err),
+                        ));
                     }
                 }
                 self.update_response_viewer();

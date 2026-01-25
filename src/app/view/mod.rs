@@ -11,7 +11,8 @@ use super::{Message, Zagel};
 use sidebar::{SidebarContext, sidebar};
 use workspace::workspace;
 
-pub use response::{ResponseDisplay, ResponseTab, pretty_json, pretty_html};
+pub use response::{ResponseData, ResponseDisplay, ResponseTab};
+pub use sidebar::IconSet;
 pub use workspace::{BuilderPane, WorkspacePane};
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +45,7 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
             collapsed: &app_ref.collapsed_collections,
             http_root: &app_ref.http_root,
             edit_state: &app_ref.edit_state,
+            icon_set: app_ref.icon_set,
         })),
         PaneContent::Workspace => pane_grid::Content::new(workspace(app_ref)),
     })

@@ -9,6 +9,129 @@ use super::super::Message;
 use crate::model::ResponsePreview;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxKind {
+    Json,
+    Html,
+    Xml,
+    JavaScript,
+    Css,
+    Text,
+}
+
+impl SyntaxKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Html => "html",
+            Self::Xml => "xml",
+            Self::JavaScript => "javascript",
+            Self::Css => "css",
+            Self::Text => "text",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HtmlParseMode {
+    Document,
+    Fragment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrettyKind {
+    Json,
+    Html,
+}
+
+#[derive(Debug, Clone)]
+pub enum PrettyBody {
+    Json { pretty: String },
+    Html { pretty: String },
+}
+
+impl PrettyBody {
+    const fn kind(&self) -> PrettyKind {
+        match self {
+            Self::Json { .. } => PrettyKind::Json,
+            Self::Html { .. } => PrettyKind::Html,
+        }
+    }
+
+    fn text(&self) -> &str {
+        match self {
+            Self::Json { pretty } | Self::Html { pretty } => pretty,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResponseBodyData {
+    raw: String,
+    syntax: SyntaxKind,
+    pretty: Option<PrettyBody>,
+}
+
+impl ResponseBodyData {
+    pub fn from_response(resp: &ResponsePreview) -> Self {
+        let raw = resp
+            .error
+            .clone()
+            .or_else(|| resp.body.clone())
+            .unwrap_or_else(|| "No body".to_string());
+        let syntax = response_syntax_kind(resp);
+        let pretty_json = pretty_json(&raw).map(|pretty| PrettyBody::Json { pretty });
+        let pretty = pretty_json.or_else(|| {
+            if syntax == SyntaxKind::Html {
+                let mode = html_parse_mode(&raw);
+                let pretty = pretty_html(&raw, mode);
+                if pretty.is_empty() {
+                    None
+                } else {
+                    Some(PrettyBody::Html { pretty })
+                }
+            } else {
+                None
+            }
+        });
+
+        Self {
+            raw,
+            syntax,
+            pretty,
+        }
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    pub const fn syntax(&self) -> SyntaxKind {
+        self.syntax
+    }
+
+    pub fn pretty_text(&self) -> Option<&str> {
+        self.pretty.as_ref().map(PrettyBody::text)
+    }
+
+    pub fn pretty_kind(&self) -> Option<PrettyKind> {
+        self.pretty.as_ref().map(PrettyBody::kind)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResponseData {
+    pub preview: ResponsePreview,
+    pub body: ResponseBodyData,
+}
+
+impl ResponseData {
+    pub fn from_preview(preview: ResponsePreview) -> Self {
+        let body = ResponseBodyData::from_response(&preview);
+        Self { preview, body }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponseDisplay {
     Raw,
     Pretty,
@@ -78,7 +201,7 @@ pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Messag
 /// based on the selected tab. Supports both raw and pretty-printed views for
 /// JSON and HTML content.
 pub fn response_panel<'a>(
-    response: Option<&ResponsePreview>,
+    response: Option<&ResponseData>,
     content: &'a text_editor::Content,
     display: ResponseDisplay,
     tab: ResponseTab,
@@ -86,7 +209,9 @@ pub fn response_panel<'a>(
 ) -> Element<'a, Message> {
     response.map_or_else(
         || text("No response yet").into(),
-        |resp| {
+        |response| {
+            let resp = &response.preview;
+            let body = &response.body;
             let header = match (resp.status, resp.duration) {
                 (Some(status), Some(duration)) => {
                     format!("HTTP {status} in {} ms", duration.as_millis())
@@ -94,12 +219,6 @@ pub fn response_panel<'a>(
                 (Some(status), None) => format!("HTTP {status}"),
                 _ => "No response".to_string(),
             };
-
-            let body_text = resp
-                .error
-                .clone()
-                .or_else(|| resp.body.clone())
-                .unwrap_or_else(|| "No body".to_string());
 
             let mut headers_view = column![];
             if resp.headers.is_empty() {
@@ -110,38 +229,23 @@ pub fn response_panel<'a>(
                 }
             }
 
-            let is_html = response_syntax(resp) == "html";
-            let body_is_pretty_json = pretty_json(&body_text).is_some();
-            // Check if HTML formatting would actually change the content
-            // We check if formatting produces different output (meaning it worked)
-            let body_is_pretty_html = if is_html {
-                let formatted = pretty_html(&body_text);
-                formatted != body_text.trim() && !formatted.is_empty()
-            } else {
-                false
-            };
-            let body_is_pretty = body_is_pretty_json || body_is_pretty_html;
-            let syntax = response_syntax(resp);
+            let pretty_kind = body.pretty_kind();
+            let syntax = body.syntax();
             let body_editor = text_editor(content)
                 .height(Length::Fill)
-                .highlight(syntax, highlight_theme)
+                .highlight(syntax.as_str(), highlight_theme)
                 .wrapping(Wrapping::None);
 
             let body_section: Element<'_, Message> = column![
                 text(format!(
                     "Body ({})",
-                    match display {
-                        ResponseDisplay::Pretty if body_is_pretty => {
-                            if body_is_pretty_html {
-                                "pretty (HTML)"
-                            } else if body_is_pretty_json {
-                                "pretty (JSON)"
-                            } else {
-                                "pretty"
-                            }
+                    match (display, pretty_kind) {
+                        (ResponseDisplay::Pretty, Some(PrettyKind::Html)) => {
+                            "pretty (HTML; formatted view)"
                         }
-                        ResponseDisplay::Pretty => "pretty (raw shown)",
-                        ResponseDisplay::Raw => "raw",
+                        (ResponseDisplay::Pretty, Some(PrettyKind::Json)) => "pretty (JSON)",
+                        (ResponseDisplay::Pretty, None) => "pretty (raw shown)",
+                        (ResponseDisplay::Raw, _) => "raw",
                     }
                 ))
                 .size(14),
@@ -183,14 +287,16 @@ pub fn pretty_json(raw: &str) -> Option<String> {
 
 /// Formats HTML with proper indentation using scraper (html5ever).
 /// Handles malformed HTML gracefully by using html5ever's robust parsing.
-pub fn pretty_html(raw: &str) -> String {
+pub fn pretty_html(raw: &str, mode: HtmlParseMode) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
-    // Parse HTML using scraper (which uses html5ever internally - very lenient)
-    let document = Html::parse_document(trimmed);
+    let document = match mode {
+        HtmlParseMode::Document => Html::parse_document(trimmed),
+        HtmlParseMode::Fragment => Html::parse_fragment(trimmed),
+    };
 
     // List of void/self-closing tags that don't need closing tags
     let void_tags: std::collections::HashSet<&str> = [
@@ -200,11 +306,64 @@ pub fn pretty_html(raw: &str) -> String {
     .into_iter()
     .collect();
 
-    // Format the DOM tree with proper indentation
     let mut result = String::new();
-    format_node(document.tree.root(), &mut result, 0, &void_tags, false, false);
+    match mode {
+        HtmlParseMode::Document => {
+            format_node(document.tree.root(), &mut result, 0, &void_tags, false, false);
+        }
+        HtmlParseMode::Fragment => {
+            let raw_has_body_tag = trimmed.to_ascii_lowercase().contains("<body");
+            format_fragment_root(
+                document.tree.root(),
+                &mut result,
+                &void_tags,
+                raw_has_body_tag,
+            );
+        }
+    }
 
     result
+}
+
+fn format_fragment_root(
+    root: NodeRef<'_, Node>,
+    output: &mut String,
+    void_tags: &std::collections::HashSet<&str>,
+    raw_has_body_tag: bool,
+) {
+    let element_children: Vec<_> = root
+        .children()
+        .filter(|child| matches!(child.value(), Node::Element(_)))
+        .collect();
+
+    if element_children.len() == 1
+        && matches!(element_children[0].value(), Node::Element(element) if element.name.local.as_ref() == "html")
+    {
+        let html_node = element_children[0];
+        let body_node = html_node
+            .children()
+            .find(|child| matches!(child.value(), Node::Element(element) if element.name.local.as_ref() == "body"));
+        match (raw_has_body_tag, body_node) {
+            (false, Some(body)) => {
+                for child in body.children() {
+                    format_node(child, output, 0, void_tags, false, false);
+                }
+            }
+            (true, Some(body)) => {
+                format_node(body, output, 0, void_tags, false, false);
+            }
+            (_, None) => {
+                for child in html_node.children() {
+                    format_node(child, output, 0, void_tags, false, false);
+                }
+            }
+        }
+        return;
+    }
+
+    for child in root.children() {
+        format_node(child, output, 0, void_tags, false, false);
+    }
 }
 
 /// Recursively formats an HTML node tree with proper indentation.
@@ -352,10 +511,7 @@ fn format_node(
     }
 }
 
-/// Determines the syntax highlighting language based on the response's Content-Type header.
-/// 
-/// Returns one of: "json", "html", "xml", "javascript", "css", or "text" (default).
-fn response_syntax(resp: &ResponsePreview) -> &'static str {
+fn response_syntax_kind(resp: &ResponsePreview) -> SyntaxKind {
     let content_type = resp
         .headers
         .iter()
@@ -364,16 +520,47 @@ fn response_syntax(resp: &ResponsePreview) -> &'static str {
         .unwrap_or_default();
 
     if content_type.contains("json") {
-        "json"
+        SyntaxKind::Json
     } else if content_type.contains("html") {
-        "html"
+        SyntaxKind::Html
     } else if content_type.contains("xml") {
-        "xml"
+        SyntaxKind::Xml
     } else if content_type.contains("javascript") {
-        "javascript"
+        SyntaxKind::JavaScript
     } else if content_type.contains("css") {
-        "css"
+        SyntaxKind::Css
     } else {
-        "text"
+        SyntaxKind::Text
+    }
+}
+
+fn html_parse_mode(raw: &str) -> HtmlParseMode {
+    let sniff = raw.trim_start().to_ascii_lowercase();
+    if sniff.contains("<!doctype") || sniff.contains("<html") {
+        HtmlParseMode::Document
+    } else {
+        HtmlParseMode::Fragment
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HtmlParseMode, html_parse_mode, pretty_html};
+
+    #[test]
+    fn html_parse_mode_detects_document_markers() {
+        assert_eq!(
+            html_parse_mode("<!DOCTYPE html><html><body></body></html>"),
+            HtmlParseMode::Document
+        );
+        assert_eq!(html_parse_mode("<HTML></HTML>"), HtmlParseMode::Document);
+        assert_eq!(html_parse_mode("<div>ok</div>"), HtmlParseMode::Fragment);
+    }
+
+    #[test]
+    fn pretty_html_fragment_keeps_fragment_shape() {
+        let input = "Hello <b>world</b>";
+        let formatted = pretty_html(input, HtmlParseMode::Fragment);
+        assert_eq!(formatted, input);
     }
 }
