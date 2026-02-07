@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,30 +6,86 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use walkdir::WalkDir;
 
-use crate::model::{Environment, HttpFile, Method, RequestDraft, RequestId};
+use crate::model::{Environment, EnvironmentScope, HttpFile, Method, RequestDraft, RequestId};
 
-pub async fn scan_http_files(root: PathBuf, max_depth: usize) -> HashMap<PathBuf, HttpFile> {
+pub async fn scan_http_files(roots: Vec<PathBuf>, max_depth: usize) -> HashMap<PathBuf, HttpFile> {
     let mut files = HashMap::new();
-    for entry in WalkDir::new(root).follow_links(true).max_depth(max_depth) {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.path().extension().and_then(|e| e.to_str()) != Some("http") {
+    for root in dedup_roots(roots) {
+        if !root.exists() || !root.is_dir() {
             continue;
         }
 
-        if let Ok(file) = parse_http_file(entry.path()) {
-            files.insert(entry.into_path(), file);
+        for entry in WalkDir::new(root).follow_links(true).max_depth(max_depth) {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|e| e.to_str()) != Some("http") {
+                continue;
+            }
+
+            if let Ok(file) = parse_http_file(entry.path()) {
+                files.insert(entry.into_path(), file);
+            }
         }
     }
     files
 }
 
-pub async fn scan_env_files(root: PathBuf, max_depth: usize) -> Vec<Environment> {
+pub async fn scan_env_files(
+    project_roots: Vec<PathBuf>,
+    global_env_roots: Vec<PathBuf>,
+    max_depth: usize,
+) -> Vec<Environment> {
     let mut envs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for root in dedup_roots(project_roots) {
+        scan_env_root(
+            &root,
+            &EnvironmentScope::Project(root.clone()),
+            max_depth,
+            &mut seen,
+            &mut envs,
+            &format!("[project:{}]", root.display()),
+        );
+    }
+
+    for root in dedup_roots(global_env_roots) {
+        scan_env_root(
+            &root,
+            &EnvironmentScope::Global,
+            max_depth,
+            &mut seen,
+            &mut envs,
+            &format!("[global:{}]", root.display()),
+        );
+    }
+
+    envs.sort_by(|a, b| a.name.cmp(&b.name));
+    envs
+}
+
+fn dedup_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+    roots.dedup();
+    roots
+}
+
+fn scan_env_root(
+    root: &Path,
+    scope: &EnvironmentScope,
+    max_depth: usize,
+    seen: &mut HashSet<PathBuf>,
+    envs: &mut Vec<Environment>,
+    label_prefix: &str,
+) {
+    if !root.exists() || !root.is_dir() {
+        return;
+    }
+
     for entry in WalkDir::new(root).follow_links(true).max_depth(max_depth) {
         let Ok(entry) = entry else {
             continue;
@@ -42,12 +98,22 @@ pub async fn scan_env_files(root: PathBuf, max_depth: usize) -> Vec<Environment>
             continue;
         }
 
-        if let Ok(env) = parse_env_file(entry.path()) {
+        let env_path = entry.into_path();
+        if !seen.insert(env_path.clone()) {
+            continue;
+        }
+
+        let relative = env_path
+            .strip_prefix(root)
+            .unwrap_or(&env_path)
+            .display()
+            .to_string();
+        let label = format!("{label_prefix} {relative}");
+
+        if let Ok(env) = parse_env_file(&env_path, label, scope.clone()) {
             envs.push(env);
         }
     }
-    envs.sort_by(|a, b| a.name.cmp(&b.name));
-    envs
 }
 
 pub fn parse_http_file(path: &Path) -> anyhow::Result<HttpFile> {
@@ -225,7 +291,11 @@ fn parse_request_block(lines: &[String]) -> Option<RequestDraft> {
     })
 }
 
-fn parse_env_file(path: &Path) -> anyhow::Result<Environment> {
+fn parse_env_file(
+    path: &Path,
+    name: String,
+    scope: EnvironmentScope,
+) -> anyhow::Result<Environment> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
     let mut vars = BTreeMap::new();
@@ -241,14 +311,7 @@ fn parse_env_file(path: &Path) -> anyhow::Result<Environment> {
         }
     }
 
-    let name = path
-        .file_stem()
-        .or_else(|| path.file_name())
-        .and_then(|s| s.to_str())
-        .unwrap_or("environment")
-        .to_string();
-
-    Ok(Environment { name, vars })
+    Ok(Environment { name, vars, scope })
 }
 
 fn is_env_file(path: &Path) -> bool {

@@ -5,6 +5,7 @@ use iced::widget::pane_grid;
 use iced::widget::text_editor;
 
 use crate::model::{Environment, HttpFile, Method, RequestId, ResponsePreview};
+use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EditTarget {
@@ -29,6 +30,12 @@ pub enum Message {
     Save,
     Saved(Result<(PathBuf, usize), String>),
     SavePathChanged(String),
+    ProjectPathInputChanged(String),
+    AddProject,
+    RemoveProject(ProjectRoot),
+    GlobalEnvPathInputChanged(String),
+    AddGlobalEnvRoot,
+    RemoveGlobalEnvRoot(GlobalEnvRoot),
     ModeChanged(crate::app::options::RequestMode),
     GraphqlQueryEdited(text_editor::Action),
     GraphqlVariablesEdited(text_editor::Action),

@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -8,6 +9,7 @@ use reqwest::Client;
 
 use crate::model::{Environment, HttpFile, RequestDraft, RequestId};
 use crate::parser::{scan_env_files, scan_http_files};
+use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 use crate::state::AppState;
 
 use super::options::{AuthState, RequestMode};
@@ -26,7 +28,9 @@ pub struct HeaderRow {
 pub enum EditState {
     #[default]
     Off,
-    On { selection: HashSet<EditTarget> },
+    On {
+        selection: HashSet<EditTarget>,
+    },
 }
 
 pub struct Zagel {
@@ -38,13 +42,17 @@ pub struct Zagel {
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
     pub(super) response: Option<crate::app::view::ResponseData>,
+    pub(super) all_environments: Vec<Environment>,
     pub(super) environments: Vec<Environment>,
     pub(super) active_environment: usize,
-    pub(super) http_root: PathBuf,
+    pub(super) project_roots: Vec<ProjectRoot>,
+    pub(super) global_env_roots: Vec<GlobalEnvRoot>,
     pub(super) state: AppState,
     pub(super) client: Client,
     pub(super) response_viewer: iced::widget::text_editor::Content,
     pub(super) save_path: String,
+    pub(super) project_path_input: String,
+    pub(super) global_env_path_input: String,
     pub(super) mode: RequestMode,
     pub(super) auth: AuthState,
     pub(super) graphql_query: iced::widget::text_editor::Content,
@@ -65,10 +73,18 @@ pub struct Zagel {
 impl Zagel {
     pub(super) fn init() -> (Self, Task<Message>) {
         let state = AppState::load();
-        let http_root = state
-            .http_root
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let project_roots = state
+            .project_roots
+            .iter()
+            .cloned()
+            .filter_map(ProjectRoot::from_stored)
+            .collect::<Vec<_>>();
+        let global_env_roots = state
+            .global_env_roots
+            .iter()
+            .cloned()
+            .filter_map(GlobalEnvRoot::from_stored)
+            .collect::<Vec<_>>();
 
         let (mut panes, sidebar) = pane_grid::State::new(super::view::PaneContent::Sidebar);
         let split = panes.split(
@@ -106,15 +122,19 @@ impl Zagel {
             edit_state: EditState::default(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
-            status_line: "Ready".to_string(),
+            status_line: "No projects configured. Add a project folder to start.".to_string(),
             response: None,
+            all_environments: Vec::new(),
             environments: vec![default_environment()],
             active_environment: 0,
-            http_root,
+            project_roots,
+            global_env_roots,
             state,
             client: Client::new(),
             response_viewer: iced::widget::text_editor::Content::with_text("No response yet"),
             save_path: String::new(),
+            project_path_input: String::new(),
+            global_env_path_input: String::new(),
             mode: RequestMode::Rest,
             auth: AuthState::default(),
             graphql_query: iced::widget::text_editor::Content::with_text(""),
@@ -132,16 +152,22 @@ impl Zagel {
             collapsed_collections: BTreeSet::new(),
         };
 
-        let task = app.rescan_files();
+        app.refresh_visible_environments();
+        let task = if app.should_scan() {
+            app.update_status_with_missing("Ready");
+            app.rescan_files()
+        } else {
+            Task::none()
+        };
         app.persist_state();
-        app.update_status_with_missing("Ready");
         (app, task)
     }
 
     pub(super) fn subscription(state: &Self) -> Subscription<Message> {
+        let watch_roots = state.watch_roots_paths();
         Subscription::batch([
             hotkeys::subscription(),
-            watcher::subscription(state.http_root.clone()),
+            watcher::subscription_many(watch_roots),
         ])
     }
 
@@ -152,11 +178,15 @@ impl Zagel {
     pub(super) fn rescan_files(&self) -> Task<Message> {
         Task::batch([
             Task::perform(
-                scan_http_files(self.http_root.clone(), FILE_SCAN_MAX_DEPTH),
+                scan_http_files(self.project_root_paths(), FILE_SCAN_MAX_DEPTH),
                 Message::HttpFilesLoaded,
             ),
             Task::perform(
-                scan_env_files(self.http_root.clone(), FILE_SCAN_MAX_DEPTH),
+                scan_env_files(
+                    self.project_root_paths(),
+                    self.global_env_root_paths(),
+                    FILE_SCAN_MAX_DEPTH,
+                ),
                 Message::EnvironmentsLoaded,
             ),
         ])
@@ -164,29 +194,89 @@ impl Zagel {
 
     pub(super) fn persist_state(&mut self) {
         let mut state = self.state.clone();
-        state.http_root = Some(self.http_root.clone());
+        state.project_roots = self.project_root_paths();
+        state.global_env_roots = self.global_env_root_paths();
+        state.http_root = state.project_roots.first().cloned();
         state.http_file_order.clone_from(&self.http_file_order);
         self.state = state.clone();
         state.save();
     }
 
-    pub(super) fn apply_saved_environment(&mut self) {
-        if let Some(saved) = self.state.active_environment.clone()
+    pub(super) fn refresh_visible_environments(&mut self) {
+        let previous_name = self
+            .environments
+            .get(self.active_environment)
+            .map(|env| env.name.clone());
+        let selected_project = self.selected_project_root().map(ProjectRoot::as_path);
+
+        let mut visible = self
+            .all_environments
+            .iter()
+            .filter(|env| env.visible_for_project(selected_project))
+            .cloned()
+            .collect::<Vec<_>>();
+        visible.sort_by(|a, b| a.name.cmp(&b.name));
+
+        self.environments = super::status::with_default_environment(visible);
+
+        let target_name = previous_name.or_else(|| self.state.active_environment.clone());
+        if let Some(name) = target_name
             && let Some((idx, _)) = self
                 .environments
                 .iter()
                 .enumerate()
-                .find(|(_, env)| env.name == saved)
+                .find(|(_, env)| env.name == name)
         {
             self.active_environment = idx;
-            self.state.active_environment =
-                Some(self.environments[self.active_environment].name.clone());
-            return;
+        } else {
+            self.active_environment = 0;
         }
-        self.active_environment = 0;
-        if let Some(env) = self.environments.get(self.active_environment) {
-            self.state.active_environment = Some(env.name.clone());
+
+        if let Some(active) = self.environments.get(self.active_environment) {
+            self.state.active_environment = Some(active.name.clone());
         }
+    }
+
+    pub(super) fn project_root_paths(&self) -> Vec<PathBuf> {
+        self.project_roots
+            .iter()
+            .map(ProjectRoot::to_path_buf)
+            .collect()
+    }
+
+    pub(super) fn global_env_root_paths(&self) -> Vec<PathBuf> {
+        self.global_env_roots
+            .iter()
+            .map(GlobalEnvRoot::to_path_buf)
+            .collect()
+    }
+
+    fn watch_roots_paths(&self) -> Vec<PathBuf> {
+        let mut roots = self.project_root_paths();
+        roots.extend(self.global_env_root_paths());
+        roots.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+        roots.dedup();
+        roots
+    }
+
+    pub(super) fn default_project_root(&self) -> Option<&ProjectRoot> {
+        self.project_roots.first()
+    }
+
+    pub(super) const fn should_scan(&self) -> bool {
+        !(self.project_roots.is_empty() && self.global_env_roots.is_empty())
+    }
+
+    pub(super) fn selected_project_root(&self) -> Option<&ProjectRoot> {
+        let RequestId::HttpFile { path, .. } = self.selection.as_ref()?;
+        self.project_root_for_path(path)
+    }
+
+    pub(super) fn project_root_for_path(&self, path: &Path) -> Option<&ProjectRoot> {
+        self.project_roots
+            .iter()
+            .filter(|root| path.starts_with(root.as_path()))
+            .max_by_key(|root| root.as_path().components().count())
     }
 
     pub(super) fn apply_selection(&mut self, id: &RequestId) {
@@ -204,6 +294,7 @@ impl Zagel {
         self.draft = draft.clone();
         self.body_editor = iced::widget::text_editor::Content::with_text(&draft.body);
         self.set_header_rows_from_draft();
+        self.refresh_visible_environments();
         self.save_path = path.display().to_string();
         self.update_status_with_missing("Ready");
         self.update_response_viewer();

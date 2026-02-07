@@ -8,6 +8,11 @@ use crate::theme::ThemeChoice;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppState {
     pub active_environment: Option<String>,
+    #[serde(default)]
+    pub project_roots: Vec<PathBuf>,
+    #[serde(default)]
+    pub global_env_roots: Vec<PathBuf>,
+    #[serde(default)]
     pub http_root: Option<PathBuf>,
     #[serde(default)]
     pub theme: ThemeChoice,
@@ -21,10 +26,18 @@ impl AppState {
             return Self::default();
         };
 
-        fs::read_to_string(&path).map_or_else(
+        let mut state = fs::read_to_string(&path).map_or_else(
             |_| Self::default(),
             |raw| toml::from_str(&raw).unwrap_or_default(),
-        )
+        );
+
+        if state.project_roots.is_empty()
+            && let Some(root) = state.http_root.take()
+        {
+            state.project_roots.push(root);
+        }
+
+        state
     }
 
     pub fn save(&self) {

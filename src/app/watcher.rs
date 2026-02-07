@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::sync::mpsc as std_mpsc;
 use std::task::{Context, Poll};
 
-use iced::futures::{channel::mpsc, stream::BoxStream, Stream, StreamExt};
 use iced::Subscription;
+use iced::futures::{Stream, StreamExt, channel::mpsc, stream::BoxStream};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::Message;
@@ -16,12 +16,8 @@ fn send_watcher_unavailable(sender: &mut mpsc::Sender<Message>, message: String)
     }
 }
 
-pub fn subscription(root: PathBuf) -> Subscription<Message> {
-    Subscription::run_with(WatchRoot(root), watch_stream)
-}
-
 #[derive(Clone, Hash)]
-struct WatchRoot(PathBuf);
+struct WatchRoots(Vec<PathBuf>);
 
 struct WatchStream {
     receiver: mpsc::Receiver<Message>,
@@ -43,8 +39,17 @@ impl Drop for WatchStream {
     }
 }
 
-fn watch_stream(root: &WatchRoot) -> BoxStream<'static, Message> {
-    let root = root.0.clone();
+pub fn subscription_many(mut roots: Vec<PathBuf>) -> Subscription<Message> {
+    roots.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+    roots.dedup();
+    if roots.is_empty() {
+        return Subscription::none();
+    }
+    Subscription::run_with(WatchRoots(roots), watch_stream_many)
+}
+
+fn watch_stream_many(roots: &WatchRoots) -> BoxStream<'static, Message> {
+    let roots = roots.0.clone();
     let (sender, receiver) = mpsc::channel(64);
     let (shutdown_tx, shutdown_rx) = std_mpsc::channel();
 
@@ -79,13 +84,25 @@ fn watch_stream(root: &WatchRoot) -> BoxStream<'static, Message> {
             return;
         }
 
-        if let Err(err) = watcher.watch(&root, RecursiveMode::Recursive) {
+        let mut watched_any = false;
+        for root in &roots {
+            if let Err(err) = watcher.watch(root, RecursiveMode::Recursive) {
+                send_watcher_unavailable(
+                    &mut status_sender,
+                    format!(
+                        "Watcher unavailable: failed to watch {}: {err}",
+                        root.display()
+                    ),
+                );
+            } else {
+                watched_any = true;
+            }
+        }
+
+        if !watched_any {
             send_watcher_unavailable(
                 &mut status_sender,
-                format!(
-                    "Watcher unavailable: failed to start watching {}: {err}",
-                    root.display()
-                ),
+                "Watcher unavailable: no valid folders to watch".to_string(),
             );
             return;
         }

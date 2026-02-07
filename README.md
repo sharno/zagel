@@ -11,7 +11,9 @@ The UI is still rough around the edges but it's functioning with good keyboard s
 - Loads requests from `.http` files (blocks separated by `###`)
 - Loads environments from `.env` files (simple `KEY=VALUE` format)
 - Variable substitution in URL/headers/body via `{{VAR_NAME}}`
-- Periodic rescan of your configured roots
+- Add/remove multiple project roots from the sidebar
+- Per-project environment files plus optional global environment roots
+- Periodic rescan of configured folders
 
 ## Install
 
@@ -66,13 +68,12 @@ You can use variables in requests as `{{API_URL}}` / `{{TOKEN}}`.
 
 ## Configuration
 
-Zagel stores settings in `~/.config/zagel/config.toml` (exact location depends on your OS).
+Zagel stores UI/application state in `~/.config/zagel/state.toml` (exact location depends on your OS).
 
-Supported keys:
-- `http_root` (directory to scan for `.http`)
-- `env_root` (directory to scan for `*.env`, defaults to `http_root`)
-- `polling_interval_secs` (default `2`)
-- `scan_depth` (default `6`)
+Relevant keys:
+- `project_roots` (folders scanned for `.http` request collections and project-scoped `.env` files)
+- `global_env_roots` (folders scanned for global `.env` files)
+- `active_environment` (last selected environment label)
 
 ## Contributing
 
