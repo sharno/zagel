@@ -4,6 +4,7 @@ mod app;
 mod model;
 mod net;
 mod parser;
+mod pathing;
 mod state;
 mod theme;
 

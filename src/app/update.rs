@@ -9,9 +9,10 @@ use iced::{Task, clipboard};
 use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
 use crate::net::send_request;
 use crate::parser::{persist_request, write_http_file};
+use crate::pathing::{GlobalEnvRoot, ProjectRoot, SaveFilePath};
 
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
-use super::status::{status_with_missing, with_default_environment};
+use super::status::status_with_missing;
 use super::{EditState, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
@@ -21,19 +22,14 @@ fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
 }
 
-const fn edit_selection_mut(
-    edit_state: &mut EditState,
-) -> Option<&mut HashSet<EditTarget>> {
+const fn edit_selection_mut(edit_state: &mut EditState) -> Option<&mut HashSet<EditTarget>> {
     match edit_state {
         EditState::On { selection } => Some(selection),
         EditState::Off => None,
     }
 }
 
-fn remap_edit_selection(
-    edit_state: &mut EditState,
-    mut map: impl FnMut(EditTarget) -> EditTarget,
-) {
+fn remap_edit_selection(edit_state: &mut EditState, mut map: impl FnMut(EditTarget) -> EditTarget) {
     let Some(selection) = edit_selection_mut(edit_state) else {
         return;
     };
@@ -50,7 +46,10 @@ fn swap_request_indices_in_selection_http(
     a: usize,
     b: usize,
 ) {
-    if let Some(RequestId::HttpFile { path: sel_path, index }) = selection.as_mut()
+    if let Some(RequestId::HttpFile {
+        path: sel_path,
+        index,
+    }) = selection.as_mut()
         && sel_path == path
     {
         if *index == a {
@@ -90,6 +89,9 @@ impl Zagel {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::FilesChanged => {
+                if !self.should_scan() {
+                    return Task::none();
+                }
                 if matches!(self.edit_state, EditState::On { .. }) {
                     self.pending_rescan = true;
                     return Task::none();
@@ -120,6 +122,15 @@ impl Zagel {
                     .collect();
                 new_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
                 self.http_file_order.extend(new_paths);
+                if let Some(RequestId::HttpFile { path, index }) = self.selection.clone()
+                    && self
+                        .http_files
+                        .get(&path)
+                        .is_none_or(|file| index >= file.requests.len())
+                {
+                    self.selection = None;
+                }
+                self.refresh_visible_environments();
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
@@ -232,11 +243,9 @@ impl Zagel {
                     match fs::remove_file(path) {
                         Ok(()) => {}
                         Err(_err) if !path.exists() => {}
-                        Err(err) => errors.push(format!(
-                            "Failed to delete {}: {}",
-                            path.display(),
-                            err
-                        )),
+                        Err(err) => {
+                            errors.push(format!("Failed to delete {}: {}", path.display(), err));
+                        }
                     }
                     self.http_files.remove(path);
                 }
@@ -262,6 +271,7 @@ impl Zagel {
                 {
                     self.selection = None;
                 }
+                self.refresh_visible_environments();
 
                 Task::none()
             }
@@ -363,8 +373,8 @@ impl Zagel {
                 Task::none()
             }
             Message::EnvironmentsLoaded(envs) => {
-                self.environments = with_default_environment(envs);
-                self.apply_saved_environment();
+                self.all_environments = envs;
+                self.refresh_visible_environments();
                 self.persist_state();
                 self.update_status_with_missing("Ready");
                 Task::none()
@@ -491,10 +501,14 @@ impl Zagel {
                     };
                     self.selection = Some(new_id);
                     self.update_status_with_missing("Saving new request...");
-                    let http_root = self.http_root.clone();
+                    let Some(project_root) = self.project_root_for_path(&path) else {
+                        self.update_status_with_missing("Cannot resolve project for selected file");
+                        return Task::none();
+                    };
+                    let project_root = project_root.to_path_buf();
                     return Task::perform(
                         async move {
-                            persist_request(http_root, None, new_draft, Some(path))
+                            persist_request(project_root, None, new_draft, Some(path))
                                 .await
                                 .map_err(|e| e.to_string())
                         },
@@ -564,19 +578,32 @@ impl Zagel {
             Message::Save => {
                 let selection = self.selection.clone();
                 let draft = self.draft.clone();
-                let root = self.http_root.clone();
                 let explicit_path = if let Some(RequestId::HttpFile { .. }) = selection {
                     None
                 } else {
-                    let path = self.save_path.trim();
-                    if path.is_empty() {
-                        self.update_status_with_missing(
-                            "Choose a path to save the request (Ctrl/Cmd+S)",
-                        );
-                        return Task::none();
+                    match SaveFilePath::parse_user_input(
+                        &self.save_path,
+                        self.default_project_root(),
+                    ) {
+                        Ok(path) => Some(path.to_path_buf()),
+                        Err(err) => {
+                            self.update_status_with_missing(&err.to_string());
+                            return Task::none();
+                        }
                     }
-                    Some(PathBuf::from(path))
                 };
+
+                let root = selection
+                    .as_ref()
+                    .and_then(|id| match id {
+                        RequestId::HttpFile { path, .. } => self.project_root_for_path(path),
+                    })
+                    .or_else(|| self.default_project_root())
+                    .map_or_else(
+                        || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                        ProjectRoot::to_path_buf,
+                    );
+
                 self.update_status_with_missing("Saving...");
                 Task::perform(
                     async move {
@@ -594,6 +621,7 @@ impl Zagel {
                         index,
                     };
                     self.selection = Some(id);
+                    self.refresh_visible_environments();
                     self.update_status_with_missing(&format!("Saved to {}", path.display()));
                     Task::batch([Task::none(), self.rescan_files()])
                 }
@@ -605,6 +633,105 @@ impl Zagel {
             Message::SavePathChanged(path) => {
                 self.save_path = path;
                 Task::none()
+            }
+            Message::ProjectPathInputChanged(path) => {
+                self.project_path_input = path;
+                Task::none()
+            }
+            Message::AddProject => match ProjectRoot::parse_user_input(&self.project_path_input) {
+                Ok(root) => {
+                    if self.project_roots.contains(&root) {
+                        self.update_status_with_missing("Project already configured");
+                        return Task::none();
+                    }
+                    self.project_roots.push(root);
+                    self.project_path_input.clear();
+                    self.persist_state();
+                    self.update_status_with_missing("Project added. Scanning...");
+                    self.last_scan = Some(Instant::now());
+                    self.rescan_files()
+                }
+                Err(err) => {
+                    self.update_status_with_missing(&err.to_string());
+                    Task::none()
+                }
+            },
+            Message::RemoveProject(root) => {
+                if !self.project_roots.contains(&root) {
+                    return Task::none();
+                }
+
+                self.project_roots.retain(|candidate| candidate != &root);
+                if let Some(RequestId::HttpFile { path, .. }) = self.selection.as_ref()
+                    && path.starts_with(root.as_path())
+                {
+                    self.selection = None;
+                }
+                self.refresh_visible_environments();
+
+                self.persist_state();
+
+                if self.should_scan() {
+                    self.update_status_with_missing("Project removed. Rescanning...");
+                    self.last_scan = Some(Instant::now());
+                    self.rescan_files()
+                } else {
+                    self.http_files.clear();
+                    self.http_file_order.clear();
+                    self.all_environments.clear();
+                    self.refresh_visible_environments();
+                    self.update_status_with_missing(
+                        "No projects configured. Add a project folder to start.",
+                    );
+                    Task::none()
+                }
+            }
+            Message::GlobalEnvPathInputChanged(path) => {
+                self.global_env_path_input = path;
+                Task::none()
+            }
+            Message::AddGlobalEnvRoot => {
+                match GlobalEnvRoot::parse_user_input(&self.global_env_path_input) {
+                    Ok(root) => {
+                        if self.global_env_roots.contains(&root) {
+                            self.update_status_with_missing(
+                                "Global environment folder already configured",
+                            );
+                            return Task::none();
+                        }
+                        self.global_env_roots.push(root);
+                        self.global_env_path_input.clear();
+                        self.persist_state();
+                        self.update_status_with_missing("Global env folder added. Scanning...");
+                        self.last_scan = Some(Instant::now());
+                        self.rescan_files()
+                    }
+                    Err(err) => {
+                        self.update_status_with_missing(&err.to_string());
+                        Task::none()
+                    }
+                }
+            }
+            Message::RemoveGlobalEnvRoot(root) => {
+                if !self.global_env_roots.contains(&root) {
+                    return Task::none();
+                }
+
+                self.global_env_roots.retain(|candidate| candidate != &root);
+                self.persist_state();
+
+                if self.should_scan() {
+                    self.update_status_with_missing("Global env folder removed. Rescanning...");
+                    self.last_scan = Some(Instant::now());
+                    self.rescan_files()
+                } else {
+                    self.all_environments.clear();
+                    self.refresh_visible_environments();
+                    self.update_status_with_missing(
+                        "No projects configured. Add a project folder to start.",
+                    );
+                    Task::none()
+                }
             }
         }
     }

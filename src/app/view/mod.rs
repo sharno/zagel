@@ -25,13 +25,11 @@ pub fn section<'a, Message: 'a>(
     title: &'a str,
     content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    container(
-        column![text(title).size(15), rule::horizontal(1), content].spacing(6),
-    )
-    .padding(12)
-    .width(Length::Fill)
-    .style(container::bordered_box)
-    .into()
+    container(column![text(title).size(15), rule::horizontal(1), content].spacing(6))
+        .padding(12)
+        .width(Length::Fill)
+        .style(container::bordered_box)
+        .into()
 }
 
 pub fn view(app: &Zagel) -> Element<'_, Message> {
@@ -43,7 +41,10 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
             http_file_order: &app_ref.http_file_order,
             selection: app_ref.selection.as_ref(),
             collapsed: &app_ref.collapsed_collections,
-            http_root: &app_ref.http_root,
+            project_roots: &app_ref.project_roots,
+            global_env_roots: &app_ref.global_env_roots,
+            project_path_input: &app_ref.project_path_input,
+            global_env_path_input: &app_ref.global_env_path_input,
             edit_state: &app_ref.edit_state,
             icon_set: app_ref.icon_set,
         })),
