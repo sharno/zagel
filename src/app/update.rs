@@ -687,6 +687,7 @@ impl Zagel {
                     self.last_scan = Some(Instant::now());
                     self.rescan_files()
                 } else {
+                    self.selection = None;
                     self.http_files.clear();
                     self.http_file_order.clear();
                     self.all_environments.clear();
@@ -739,7 +740,7 @@ impl Zagel {
                     self.all_environments.clear();
                     self.refresh_visible_environments();
                     self.update_status_with_missing(
-                        "No projects configured. Add a project folder to start.",
+                        "Global env folder removed. Add a project folder to scan requests.",
                     );
                     Task::none()
                 }
