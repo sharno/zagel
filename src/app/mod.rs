@@ -1,3 +1,4 @@
+mod domain;
 mod headers;
 mod hotkeys;
 mod lifecycle;

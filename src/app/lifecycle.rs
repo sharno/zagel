@@ -1,17 +1,20 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::Path;
-use std::path::PathBuf;
+use std::collections::{BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application};
 use reqwest::Client;
 
-use crate::model::{Environment, HttpFile, RequestDraft, RequestId};
+use crate::model::{RequestDraft, RequestId};
 use crate::parser::{scan_env_files, scan_http_files};
-use crate::pathing::{GlobalEnvRoot, ProjectRoot};
+use crate::pathing::{GlobalEnvRoot, ProjectRoot, SaveFilePath};
 use crate::state::AppState;
 
+use super::domain::{
+    AddRequestPlan, AddRequestPlanError, ProjectConfiguration, SavePlan, SavePlanError,
+    SaveTarget, WorkspaceState,
+};
 use super::options::{AuthState, RequestMode};
 use super::status::{default_environment, status_with_missing};
 use super::{EditTarget, Message, hotkeys, view, watcher};
@@ -33,20 +36,53 @@ pub enum EditState {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupStatus {
+    Ready,
+    NeedsProject,
+    WarningReady { ignored: usize },
+    WarningNeedsProject { ignored: usize },
+}
+
+impl StartupStatus {
+    #[allow(clippy::missing_const_for_fn)]
+    fn from_context(startup_warnings: &[String], configuration: &ProjectConfiguration) -> Self {
+        match (startup_warnings.is_empty(), configuration.should_scan()) {
+            (true, true) => Self::Ready,
+            (true, false) => Self::NeedsProject,
+            (false, true) => Self::WarningReady {
+                ignored: startup_warnings.len(),
+            },
+            (false, false) => Self::WarningNeedsProject {
+                ignored: startup_warnings.len(),
+            },
+        }
+    }
+
+    fn status_line(self) -> String {
+        match self {
+            Self::Ready => "Ready".to_string(),
+            Self::NeedsProject => "No projects configured. Add a project folder to start.".to_string(),
+            Self::WarningReady { ignored } => {
+                format!("Ignored {ignored} invalid saved folder(s).")
+            }
+            Self::WarningNeedsProject { ignored } => {
+                format!("Ignored {ignored} invalid saved folder(s). Add a project folder to start.")
+            }
+        }
+    }
+}
+
 pub struct Zagel {
-    pub(super) http_files: HashMap<PathBuf, HttpFile>,
-    pub(super) http_file_order: Vec<PathBuf>,
-    pub(super) selection: Option<RequestId>,
+    pub(super) workspace: WorkspaceState,
+    pub(super) configuration: ProjectConfiguration,
     pub(super) edit_state: EditState,
     pub(super) draft: RequestDraft,
     pub(super) body_editor: iced::widget::text_editor::Content,
     pub(super) status_line: String,
     pub(super) response: Option<crate::app::view::ResponseData>,
-    pub(super) all_environments: Vec<Environment>,
-    pub(super) environments: Vec<Environment>,
+    pub(super) environments: Vec<crate::model::Environment>,
     pub(super) active_environment: usize,
-    pub(super) project_roots: Vec<ProjectRoot>,
-    pub(super) global_env_roots: Vec<GlobalEnvRoot>,
     pub(super) state: AppState,
     pub(super) client: Client,
     pub(super) response_viewer: iced::widget::text_editor::Content,
@@ -70,7 +106,7 @@ pub struct Zagel {
     pub(super) collapsed_collections: BTreeSet<String>,
 }
 
-fn load_configured_roots(state: &AppState) -> (Vec<ProjectRoot>, Vec<GlobalEnvRoot>, Vec<String>) {
+fn load_configured_roots(state: &AppState) -> (ProjectConfiguration, Vec<String>) {
     let mut startup_warnings = Vec::new();
 
     let mut project_roots = Vec::new();
@@ -95,36 +131,18 @@ fn load_configured_roots(state: &AppState) -> (Vec<ProjectRoot>, Vec<GlobalEnvRo
         }
     }
 
-    (project_roots, global_env_roots, startup_warnings)
-}
-
-fn startup_status_line(
-    startup_warnings: &[String],
-    project_roots: &[ProjectRoot],
-    global_env_roots: &[GlobalEnvRoot],
-) -> String {
-    let startup_warning_summary = (!startup_warnings.is_empty()).then(|| {
-        format!(
-            "Ignored {} invalid saved folder(s).",
-            startup_warnings.len()
-        )
-    });
-    let has_any_root = !(project_roots.is_empty() && global_env_roots.is_empty());
-
-    match (startup_warning_summary, has_any_root) {
-        (Some(summary), false) => format!("{summary} Add a project folder to start."),
-        (Some(summary), true) => summary,
-        (None, false) => "No projects configured. Add a project folder to start.".to_string(),
-        (None, true) => "Ready".to_string(),
-    }
+    (
+        ProjectConfiguration::from_loaded(project_roots, global_env_roots),
+        startup_warnings,
+    )
 }
 
 impl Zagel {
     pub(super) fn init() -> (Self, Task<Message>) {
         let state = AppState::load();
-        let (project_roots, global_env_roots, startup_warnings) = load_configured_roots(&state);
-        let initial_status_line =
-            startup_status_line(&startup_warnings, &project_roots, &global_env_roots);
+        let (configuration, startup_warnings) = load_configured_roots(&state);
+        let startup_status = StartupStatus::from_context(&startup_warnings, &configuration);
+        let initial_status_line = startup_status.status_line();
 
         let (mut panes, sidebar) = pane_grid::State::new(super::view::PaneContent::Sidebar);
         let split = panes.split(
@@ -155,20 +173,18 @@ impl Zagel {
             builder_panes.resize(split, 0.45);
         }
 
+        let workspace = WorkspaceState::from_config(&configuration, state.http_file_order.clone());
+
         let mut app = Self {
-            http_files: HashMap::new(),
-            http_file_order: state.http_file_order.clone(),
-            selection: None,
+            workspace,
+            configuration,
             edit_state: EditState::default(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
             status_line: initial_status_line,
             response: None,
-            all_environments: Vec::new(),
             environments: vec![default_environment()],
             active_environment: 0,
-            project_roots,
-            global_env_roots,
             state,
             client: Client::new(),
             response_viewer: iced::widget::text_editor::Content::with_text("No response yet"),
@@ -243,7 +259,7 @@ impl Zagel {
         state.project_roots = self.project_root_paths();
         state.global_env_roots = self.global_env_root_paths();
         state.http_root = state.project_roots.first().cloned();
-        state.http_file_order.clone_from(&self.http_file_order);
+        state.http_file_order = self.workspace.http_file_order().to_vec();
         self.state = state.clone();
         state.save();
     }
@@ -256,7 +272,8 @@ impl Zagel {
         let selected_project = self.selected_project_root().map(ProjectRoot::as_path);
 
         let mut visible = self
-            .all_environments
+            .workspace
+            .all_environments()
             .iter()
             .filter(|env| env.visible_for_project(selected_project))
             .cloned()
@@ -283,58 +300,58 @@ impl Zagel {
         }
     }
 
+    pub(super) fn project_roots(&self) -> &[ProjectRoot] {
+        self.configuration.project_roots()
+    }
+
+    pub(super) fn global_env_roots(&self) -> &[GlobalEnvRoot] {
+        self.configuration.global_env_roots()
+    }
+
     pub(super) fn project_root_paths(&self) -> Vec<PathBuf> {
-        self.project_roots
-            .iter()
-            .map(ProjectRoot::to_path_buf)
-            .collect()
+        self.configuration.project_root_paths()
     }
 
     pub(super) fn global_env_root_paths(&self) -> Vec<PathBuf> {
-        self.global_env_roots
-            .iter()
-            .map(GlobalEnvRoot::to_path_buf)
-            .collect()
+        self.configuration.global_env_root_paths()
     }
 
     fn watch_roots_paths(&self) -> Vec<PathBuf> {
-        let mut roots = self.project_root_paths();
-        roots.extend(self.global_env_root_paths());
-        roots.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-        roots.dedup();
-        roots
+        self.configuration.watch_root_paths()
     }
 
     pub(super) fn default_project_root(&self) -> Option<&ProjectRoot> {
-        self.project_roots.first()
+        self.configuration.default_project_root()
     }
 
-    #[allow(clippy::missing_const_for_fn)]
-    pub(super) fn should_scan(&self) -> bool {
-        !(self.project_roots.is_empty() && self.global_env_roots.is_empty())
+    pub(super) const fn should_scan(&self) -> bool {
+        self.configuration.should_scan()
     }
 
     pub(super) fn selected_project_root(&self) -> Option<&ProjectRoot> {
-        let RequestId::HttpFile { path, .. } = self.selection.as_ref()?;
+        let RequestId::HttpFile { path, .. } = self.workspace.selection()?;
         self.project_root_for_path(path)
     }
 
     pub(super) fn project_root_for_path(&self, path: &Path) -> Option<&ProjectRoot> {
-        self.project_roots
-            .iter()
-            .filter(|root| path.starts_with(root.as_path()))
-            .max_by_key(|root| root.as_path().components().count())
+        self.configuration.project_root_for_path(path)
     }
 
     pub(super) fn apply_selection(&mut self, id: &RequestId) {
         let RequestId::HttpFile { path, index } = id;
-        self.selection = Some(id.clone());
-        let maybe_request = self
-            .http_files
-            .get(path)
-            .and_then(|file| file.requests.get(*index));
+        let maybe_request = {
+            let Some(workspace) = self.workspace.configured_mut() else {
+                return;
+            };
+            workspace.selection = Some(id.clone());
+            workspace
+                .http_files
+                .get(path)
+                .and_then(|file| file.requests.get(*index))
+                .cloned()
+        };
 
-        let draft = maybe_request.cloned().unwrap_or_else(|| RequestDraft {
+        let draft = maybe_request.unwrap_or_else(|| RequestDraft {
             title: "New request".to_string(),
             ..Default::default()
         });
@@ -345,6 +362,57 @@ impl Zagel {
         self.save_path = path.display().to_string();
         self.update_status_with_missing("Ready");
         self.update_response_viewer();
+    }
+
+    pub(super) fn build_save_plan(&self) -> Result<SavePlan, SavePlanError> {
+        let draft = self.draft.clone();
+        if let Some(id) = self.workspace.selection_cloned() {
+            let RequestId::HttpFile { path: selected_path, .. } = &id;
+            let Some(root) = self.project_root_for_path(selected_path) else {
+                return Err(SavePlanError::SelectedRequestOutsideConfiguredProjects(
+                    selected_path.clone(),
+                ));
+            };
+            Ok(SavePlan {
+                root: root.to_path_buf(),
+                target: SaveTarget::ExistingSelection(id),
+                draft,
+            })
+        } else {
+            let Some(default_root) = self.default_project_root() else {
+                return Err(SavePlanError::MissingProjectRoot);
+            };
+            let explicit_path = SaveFilePath::parse_user_input(&self.save_path, Some(default_root))
+                .map_err(SavePlanError::InvalidPath)?;
+            Ok(SavePlan {
+                root: default_root.to_path_buf(),
+                target: SaveTarget::ExplicitPath(explicit_path.to_path_buf()),
+                draft,
+            })
+        }
+    }
+
+    pub(super) fn build_add_request_plan(&self) -> Result<AddRequestPlan, AddRequestPlanError> {
+        let Some(RequestId::HttpFile { path, .. }) = self.workspace.selection_cloned() else {
+            return Err(AddRequestPlanError::NoSelectedFile);
+        };
+        let Some(workspace) = self.workspace.configured() else {
+            return Err(AddRequestPlanError::NoSelectedFile);
+        };
+        if !workspace.http_files.contains_key(&path) {
+            return Err(AddRequestPlanError::SelectedFileNotLoaded(path));
+        }
+        let Some(project_root) = self.project_root_for_path(&path) else {
+            return Err(AddRequestPlanError::SelectedFileOutsideConfiguredProjects(path));
+        };
+        Ok(AddRequestPlan {
+            file_path: path,
+            project_root: project_root.to_path_buf(),
+            new_draft: RequestDraft {
+                title: "New request".to_string(),
+                ..Default::default()
+            },
+        })
     }
 
     pub(super) fn set_header_rows_from_draft(&mut self) {
@@ -404,7 +472,7 @@ impl Zagel {
 
 pub fn run() -> iced::Result {
     application(Zagel::init, Zagel::update, view::view)
-        .title("Zagel  REST workbench")
+        .title("Zagel \u{0007} REST workbench")
         .subscription(Zagel::subscription)
         .theme(Zagel::theme)
         .run()

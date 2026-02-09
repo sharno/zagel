@@ -6,11 +6,12 @@ use std::time::{Duration, Instant};
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
-use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
+use crate::model::{Method, RequestId, ResponsePreview};
 use crate::net::send_request;
 use crate::parser::{persist_request, write_http_file};
-use crate::pathing::{GlobalEnvRoot, ProjectRoot, SaveFilePath};
+use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 
+use super::domain::{GlobalEnvChangeOutcome, ProjectChangeOutcome};
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::status_with_missing;
 use super::{EditState, EditTarget, HeaderRow, Message, Zagel};
@@ -29,7 +30,10 @@ const fn edit_selection_mut(edit_state: &mut EditState) -> Option<&mut HashSet<E
     }
 }
 
-fn remap_edit_selection(edit_state: &mut EditState, mut map: impl FnMut(EditTarget) -> EditTarget) {
+fn remap_edit_selection(
+    edit_state: &mut EditState,
+    mut map: impl FnMut(EditTarget) -> EditTarget,
+) {
     let Some(selection) = edit_selection_mut(edit_state) else {
         return;
     };
@@ -84,6 +88,17 @@ fn swap_request_indices_in_edit_selection_http(
     });
 }
 
+fn remove_edit_targets_for_root(edit_state: &mut EditState, root: &ProjectRoot) {
+    if let EditState::On { selection } = edit_state {
+        selection.retain(|target| match target {
+            EditTarget::Collection(path)
+            | EditTarget::Request(RequestId::HttpFile { path, .. }) => {
+                !path.starts_with(root.as_path())
+            }
+        });
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 impl Zagel {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
@@ -111,24 +126,29 @@ impl Zagel {
                 Task::none()
             }
             Message::HttpFilesLoaded(files) => {
-                self.http_files = files;
-                self.http_file_order
-                    .retain(|path| self.http_files.contains_key(path));
-                let mut new_paths: Vec<PathBuf> = self
+                if !self.should_scan() {
+                    return Task::none();
+                }
+                let workspace = self.workspace.ensure_configured();
+                workspace.http_files = files;
+                workspace
+                    .http_file_order
+                    .retain(|path| workspace.http_files.contains_key(path));
+                let mut new_paths: Vec<PathBuf> = workspace
                     .http_files
                     .keys()
-                    .filter(|path| !self.http_file_order.contains(path))
+                    .filter(|path| !workspace.http_file_order.contains(path))
                     .cloned()
                     .collect();
                 new_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-                self.http_file_order.extend(new_paths);
-                if let Some(RequestId::HttpFile { path, index }) = self.selection.clone()
-                    && self
+                workspace.http_file_order.extend(new_paths);
+                if let Some(RequestId::HttpFile { path, index }) = workspace.selection.clone()
+                    && workspace
                         .http_files
                         .get(&path)
                         .is_none_or(|file| index >= file.requests.len())
                 {
-                    self.selection = None;
+                    workspace.selection = None;
                 }
                 self.refresh_visible_environments();
                 Task::none()
@@ -179,80 +199,96 @@ impl Zagel {
                 Task::none()
             }
             Message::DeleteSelected => {
-                let selection = match &self.edit_state {
+                let edit_selection = match &self.edit_state {
                     EditState::On { selection } if !selection.is_empty() => selection.clone(),
                     _ => return Task::none(),
                 };
 
-                let mut remove_file_paths = Vec::new();
-                let mut request_ids = Vec::new();
+                let errors = {
+                    let Some(workspace) = self.workspace.configured_mut() else {
+                        return Task::none();
+                    };
 
-                for target in &selection {
-                    match target {
-                        EditTarget::Collection(path) => {
-                            remove_file_paths.push(path.clone());
+                    let mut remove_file_paths = Vec::new();
+                    let mut request_ids = Vec::new();
+
+                    for target in &edit_selection {
+                        match target {
+                            EditTarget::Collection(path) => {
+                                remove_file_paths.push(path.clone());
+                            }
+                            EditTarget::Request(id) => request_ids.push(id.clone()),
                         }
-                        EditTarget::Request(id) => request_ids.push(id.clone()),
                     }
-                }
 
-                remove_file_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-                remove_file_paths.dedup();
+                    remove_file_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+                    remove_file_paths.dedup();
 
-                let remove_files_set: HashSet<PathBuf> =
-                    remove_file_paths.iter().cloned().collect();
+                    let remove_files_set: HashSet<PathBuf> = remove_file_paths.iter().cloned().collect();
 
-                let mut file_request_removals = std::collections::HashMap::new();
-
-                for id in request_ids {
-                    let RequestId::HttpFile { path, index } = id;
-                    if remove_files_set.contains(&path) {
-                        continue;
+                    let mut file_request_removals = std::collections::HashMap::new();
+                    for id in request_ids {
+                        let RequestId::HttpFile { path, index } = id;
+                        if remove_files_set.contains(&path) {
+                            continue;
+                        }
+                        file_request_removals
+                            .entry(path)
+                            .or_insert_with(Vec::new)
+                            .push(index);
                     }
-                    file_request_removals
-                        .entry(path)
-                        .or_insert_with(Vec::new)
-                        .push(index);
-                }
 
-                let mut errors = Vec::new();
+                    let mut errors = Vec::new();
 
-                for (path, mut indices) in file_request_removals {
-                    if let Some(file) = self.http_files.get_mut(&path) {
-                        let mut updated_requests = file.requests.clone();
-                        indices.sort_unstable();
-                        indices.dedup();
-                        for idx in indices.into_iter().rev() {
-                            if idx < updated_requests.len() {
-                                updated_requests.remove(idx);
+                    for (path, mut indices) in file_request_removals {
+                        if let Some(file) = workspace.http_files.get_mut(&path) {
+                            let mut updated_requests = file.requests.clone();
+                            indices.sort_unstable();
+                            indices.dedup();
+                            for idx in indices.into_iter().rev() {
+                                if idx < updated_requests.len() {
+                                    updated_requests.remove(idx);
+                                }
+                            }
+                            if let Err(err) = write_http_file(&file.path, &updated_requests) {
+                                errors.push(format!(
+                                    "Failed to update {}: {}",
+                                    file.path.display(),
+                                    err
+                                ));
+                            } else {
+                                file.requests = updated_requests;
                             }
                         }
-                        if let Err(err) = write_http_file(&file.path, &updated_requests) {
-                            errors.push(format!(
-                                "Failed to update {}: {}",
-                                file.path.display(),
-                                err
-                            ));
-                        } else {
-                            file.requests = updated_requests;
-                        }
                     }
-                }
 
-                for path in &remove_file_paths {
-                    match fs::remove_file(path) {
-                        Ok(()) => {}
-                        Err(_err) if !path.exists() => {}
-                        Err(err) => {
-                            errors.push(format!("Failed to delete {}: {}", path.display(), err));
+                    for path in &remove_file_paths {
+                        match fs::remove_file(path) {
+                            Ok(()) => {}
+                            Err(_err) if !path.exists() => {}
+                            Err(err) => {
+                                errors.push(format!("Failed to delete {}: {}", path.display(), err));
+                            }
                         }
+                        workspace.http_files.remove(path);
                     }
-                    self.http_files.remove(path);
-                }
-                if !remove_file_paths.is_empty() {
-                    self.http_file_order
-                        .retain(|path| !remove_files_set.contains(path));
-                }
+                    if !remove_file_paths.is_empty() {
+                        workspace
+                            .http_file_order
+                            .retain(|path| !remove_files_set.contains(path));
+                    }
+
+                    if let Some(RequestId::HttpFile { path, index }) = workspace.selection.clone()
+                        && workspace
+                            .http_files
+                            .get(&path)
+                            .is_none_or(|file| index >= file.requests.len())
+                    {
+                        workspace.selection = None;
+                    }
+
+                    errors
+                };
 
                 if let EditState::On { selection } = &mut self.edit_state {
                     selection.clear();
@@ -263,31 +299,25 @@ impl Zagel {
                     self.update_status_with_missing(&errors.join("; "));
                 }
 
-                if let Some(RequestId::HttpFile { path, index }) = self.selection.clone()
-                    && self
-                        .http_files
-                        .get(&path)
-                        .is_none_or(|file| index >= file.requests.len())
-                {
-                    self.selection = None;
-                }
                 self.refresh_visible_environments();
 
                 Task::none()
             }
             Message::MoveCollectionUp(path) => {
-                if let Some(pos) = self.http_file_order.iter().position(|p| p == &path)
+                if let Some(workspace) = self.workspace.configured_mut()
+                    && let Some(pos) = workspace.http_file_order.iter().position(|p| p == &path)
                     && pos > 0
                 {
-                    self.http_file_order.swap(pos, pos - 1);
+                    workspace.http_file_order.swap(pos, pos - 1);
                 }
                 Task::none()
             }
             Message::MoveCollectionDown(path) => {
-                if let Some(pos) = self.http_file_order.iter().position(|p| p == &path)
-                    && pos + 1 < self.http_file_order.len()
+                if let Some(workspace) = self.workspace.configured_mut()
+                    && let Some(pos) = workspace.http_file_order.iter().position(|p| p == &path)
+                    && pos + 1 < workspace.http_file_order.len()
                 {
-                    self.http_file_order.swap(pos, pos + 1);
+                    workspace.http_file_order.swap(pos, pos + 1);
                 }
                 Task::none()
             }
@@ -296,27 +326,27 @@ impl Zagel {
                 if *index == 0 {
                     return Task::none();
                 }
+                let Some(workspace) = self.workspace.configured_mut() else {
+                    return Task::none();
+                };
                 let mut new_index = None;
                 let mut status_error = None;
-                if let Some(file) = self.http_files.get_mut(path)
+                if let Some(file) = workspace.http_files.get_mut(path)
                     && *index < file.requests.len()
                 {
                     let updated_index = *index - 1;
                     file.requests.swap(*index, updated_index);
                     if let Err(err) = write_http_file(&file.path, &file.requests) {
                         file.requests.swap(*index, updated_index);
-                        status_error = Some(format!(
-                            "Failed to reorder {}: {}",
-                            file.path.display(),
-                            err
-                        ));
+                        status_error =
+                            Some(format!("Failed to reorder {}: {}", file.path.display(), err));
                     } else {
                         new_index = Some(updated_index);
                     }
                 }
                 if let Some(updated_index) = new_index {
                     swap_request_indices_in_selection_http(
-                        &mut self.selection,
+                        &mut workspace.selection,
                         path,
                         *index,
                         updated_index,
@@ -335,27 +365,27 @@ impl Zagel {
             }
             Message::MoveRequestDown(id) => {
                 let RequestId::HttpFile { path, index } = &id;
+                let Some(workspace) = self.workspace.configured_mut() else {
+                    return Task::none();
+                };
                 let mut new_index = None;
                 let mut status_error = None;
-                if let Some(file) = self.http_files.get_mut(path)
+                if let Some(file) = workspace.http_files.get_mut(path)
                     && *index + 1 < file.requests.len()
                 {
                     let updated_index = *index + 1;
                     file.requests.swap(*index, updated_index);
                     if let Err(err) = write_http_file(&file.path, &file.requests) {
                         file.requests.swap(*index, updated_index);
-                        status_error = Some(format!(
-                            "Failed to reorder {}: {}",
-                            file.path.display(),
-                            err
-                        ));
+                        status_error =
+                            Some(format!("Failed to reorder {}: {}", file.path.display(), err));
                     } else {
                         new_index = Some(updated_index);
                     }
                 }
                 if let Some(updated_index) = new_index {
                     swap_request_indices_in_selection_http(
-                        &mut self.selection,
+                        &mut workspace.selection,
                         path,
                         *index,
                         updated_index,
@@ -373,7 +403,7 @@ impl Zagel {
                 Task::none()
             }
             Message::EnvironmentsLoaded(envs) => {
-                self.all_environments = envs;
+                self.workspace.set_all_environments(envs);
                 self.refresh_visible_environments();
                 self.persist_state();
                 self.update_status_with_missing("Ready");
@@ -486,37 +516,42 @@ impl Zagel {
             }
             Message::CopyComplete => Task::none(),
             Message::AddRequest => {
-                let new_draft = RequestDraft {
-                    title: "New request".to_string(),
-                    ..Default::default()
-                };
-                if let Some(RequestId::HttpFile { path, .. }) = self.selection.clone()
-                    && let Some(file) = self.http_files.get_mut(&path)
-                {
-                    file.requests.push(new_draft.clone());
-                    let new_idx = file.requests.len() - 1;
-                    let new_id = RequestId::HttpFile {
-                        path: path.clone(),
-                        index: new_idx,
-                    };
-                    self.selection = Some(new_id);
-                    self.update_status_with_missing("Saving new request...");
-                    let Some(project_root) = self.project_root_for_path(&path) else {
-                        self.update_status_with_missing("Cannot resolve project for selected file");
+                let plan = match self.build_add_request_plan() {
+                    Ok(plan) => plan,
+                    Err(err) => {
+                        self.update_status_with_missing(&err.to_string());
                         return Task::none();
-                    };
-                    let project_root = project_root.to_path_buf();
-                    return Task::perform(
-                        async move {
-                            persist_request(project_root, None, new_draft, Some(path))
-                                .await
-                                .map_err(|e| e.to_string())
-                        },
-                        Message::Saved,
-                    );
-                }
-                self.update_status_with_missing("Select a file to add a request");
-                Task::none()
+                    }
+                };
+
+                let path = plan.file_path.clone();
+                let draft = plan.new_draft.clone();
+                let Some(workspace) = self.workspace.configured_mut() else {
+                    self.update_status_with_missing("Select a file to add a request");
+                    return Task::none();
+                };
+                let Some(file) = workspace.http_files.get_mut(&path) else {
+                    self.update_status_with_missing("Select a file to add a request");
+                    return Task::none();
+                };
+
+                file.requests.push(draft.clone());
+                let new_idx = file.requests.len() - 1;
+                workspace.selection = Some(RequestId::HttpFile {
+                    path: path.clone(),
+                    index: new_idx,
+                });
+                self.update_status_with_missing("Saving new request...");
+
+                let project_root = plan.project_root;
+                Task::perform(
+                    async move {
+                        persist_request(project_root, None, draft, Some(path))
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::Saved,
+                )
             }
             Message::Send => {
                 let env = self.environments.get(self.active_environment).cloned();
@@ -534,12 +569,8 @@ impl Zagel {
                     }
                 }
                 draft.headers = apply_auth_headers(&draft.headers, &self.auth);
-                let extra_refs: Vec<&str> = extra_inputs
-                    .iter()
-                    .map(std::string::String::as_str)
-                    .collect();
-                self.status_line =
-                    status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
+                let extra_refs: Vec<&str> = extra_inputs.iter().map(String::as_str).collect();
+                self.status_line = status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
                 Task::perform(
                     send_request(self.client.clone(), draft, env),
                     Message::ResponseReady,
@@ -553,9 +584,8 @@ impl Zagel {
                     }
                     Err(err) => {
                         self.update_status_with_missing("Request failed");
-                        self.response = Some(crate::app::view::ResponseData::from_preview(
-                            ResponsePreview::error(err),
-                        ));
+                        self.response =
+                            Some(crate::app::view::ResponseData::from_preview(ResponsePreview::error(err)));
                     }
                 }
                 self.update_response_viewer();
@@ -576,37 +606,14 @@ impl Zagel {
                 Task::none()
             }
             Message::Save => {
-                let selection = self.selection.clone();
-                let draft = self.draft.clone();
-                let explicit_path = if let Some(RequestId::HttpFile { .. }) = selection {
-                    None
-                } else {
-                    match SaveFilePath::parse_user_input(
-                        &self.save_path,
-                        self.default_project_root(),
-                    ) {
-                        Ok(path) => Some(path.to_path_buf()),
-                        Err(err) => {
-                            self.update_status_with_missing(&err.to_string());
-                            return Task::none();
-                        }
+                let plan = match self.build_save_plan() {
+                    Ok(plan) => plan,
+                    Err(err) => {
+                        self.update_status_with_missing(&err.to_string());
+                        return Task::none();
                     }
                 };
-
-                let root = selection
-                    .as_ref()
-                    .and_then(|id| match id {
-                        RequestId::HttpFile { path, .. } => self.project_root_for_path(path),
-                    })
-                    .or_else(|| self.default_project_root())
-                    .map(ProjectRoot::to_path_buf);
-                let Some(root) = root else {
-                    self.update_status_with_missing(
-                        "No project configured. Add a project folder first.",
-                    );
-                    return Task::none();
-                };
-
+                let (root, selection, draft, explicit_path) = plan.into_persist_args();
                 self.update_status_with_missing("Saving...");
                 Task::perform(
                     async move {
@@ -619,11 +626,10 @@ impl Zagel {
             }
             Message::Saved(result) => match result {
                 Ok((path, index)) => {
-                    let id = RequestId::HttpFile {
+                    self.workspace.set_selection(Some(RequestId::HttpFile {
                         path: path.clone(),
                         index,
-                    };
-                    self.selection = Some(id);
+                    }));
                     self.refresh_visible_environments();
                     self.update_status_with_missing(&format!("Saved to {}", path.display()));
                     Task::batch([Task::none(), self.rescan_files()])
@@ -642,79 +648,12 @@ impl Zagel {
                 Task::none()
             }
             Message::AddProject => match ProjectRoot::parse_user_input(&self.project_path_input) {
-                Ok(root) => {
-                    if self.project_roots.contains(&root) {
-                        self.update_status_with_missing("Project already configured");
-                        return Task::none();
-                    }
-                    self.project_roots.push(root);
-                    self.project_path_input.clear();
-                    self.persist_state();
-                    self.update_status_with_missing("Project added. Scanning...");
-                    self.last_scan = Some(Instant::now());
-                    self.rescan_files()
-                }
-                Err(err) => {
-                    self.update_status_with_missing(&err.to_string());
-                    Task::none()
-                }
-            },
-            Message::RemoveProject(root) => {
-                if !self.project_roots.contains(&root) {
-                    return Task::none();
-                }
-
-                self.project_roots.retain(|candidate| candidate != &root);
-                if let Some(RequestId::HttpFile { path, .. }) = self.selection.as_ref()
-                    && path.starts_with(root.as_path())
-                {
-                    self.selection = None;
-                }
-                if let EditState::On { selection } = &mut self.edit_state {
-                    selection.retain(|target| match target {
-                        EditTarget::Collection(path) => !path.starts_with(root.as_path()),
-                        EditTarget::Request(RequestId::HttpFile { path, .. }) => {
-                            !path.starts_with(root.as_path())
-                        }
-                    });
-                }
-                self.refresh_visible_environments();
-
-                self.persist_state();
-
-                if self.should_scan() {
-                    self.update_status_with_missing("Project removed. Rescanning...");
-                    self.last_scan = Some(Instant::now());
-                    self.rescan_files()
-                } else {
-                    self.selection = None;
-                    self.http_files.clear();
-                    self.http_file_order.clear();
-                    self.all_environments.clear();
-                    self.refresh_visible_environments();
-                    self.update_status_with_missing(
-                        "No projects configured. Add a project folder to start.",
-                    );
-                    Task::none()
-                }
-            }
-            Message::GlobalEnvPathInputChanged(path) => {
-                self.global_env_path_input = path;
-                Task::none()
-            }
-            Message::AddGlobalEnvRoot => {
-                match GlobalEnvRoot::parse_user_input(&self.global_env_path_input) {
-                    Ok(root) => {
-                        if self.global_env_roots.contains(&root) {
-                            self.update_status_with_missing(
-                                "Global environment folder already configured",
-                            );
-                            return Task::none();
-                        }
-                        self.global_env_roots.push(root);
-                        self.global_env_path_input.clear();
+                Ok(root) => match self.configuration.add_project(root) {
+                    Ok(outcome) => {
+                        self.project_path_input.clear();
+                        self.workspace.sync_with_configuration(&self.configuration);
                         self.persist_state();
-                        self.update_status_with_missing("Global env folder added. Scanning...");
+                        self.update_status_with_missing(outcome.status_message());
                         self.last_scan = Some(Instant::now());
                         self.rescan_files()
                     }
@@ -722,27 +661,92 @@ impl Zagel {
                         self.update_status_with_missing(&err.to_string());
                         Task::none()
                     }
+                },
+                Err(err) => {
+                    self.update_status_with_missing(&err.to_string());
+                    Task::none()
                 }
-            }
-            Message::RemoveGlobalEnvRoot(root) => {
-                if !self.global_env_roots.contains(&root) {
-                    return Task::none();
+            },
+            Message::RemoveProject(root) => {
+                if let Some(RequestId::HttpFile { path, .. }) = self.workspace.selection()
+                    && path.starts_with(root.as_path())
+                {
+                    self.workspace.clear_selection();
                 }
+                remove_edit_targets_for_root(&mut self.edit_state, &root);
 
-                self.global_env_roots.retain(|candidate| candidate != &root);
+                let Ok(outcome) = self.configuration.remove_project(&root) else {
+                    return Task::none();
+                };
+                self.workspace.sync_with_configuration(&self.configuration);
+                self.refresh_visible_environments();
                 self.persist_state();
 
-                if self.should_scan() {
-                    self.update_status_with_missing("Global env folder removed. Rescanning...");
-                    self.last_scan = Some(Instant::now());
-                    self.rescan_files()
-                } else {
-                    self.all_environments.clear();
-                    self.refresh_visible_environments();
-                    self.update_status_with_missing(
-                        "Global env folder removed. Add a project folder to scan requests.",
-                    );
+                match outcome {
+                    ProjectChangeOutcome::AddedAndScan => Task::none(),
+                    ProjectChangeOutcome::RemovedAndScan => {
+                        self.update_status_with_missing(outcome.status_message());
+                        self.last_scan = Some(Instant::now());
+                        self.rescan_files()
+                    }
+                    ProjectChangeOutcome::RemovedLastProject => {
+                        self.workspace.clear_scan_cache();
+                        self.refresh_visible_environments();
+                        self.update_status_with_missing(outcome.status_message());
+                        Task::none()
+                    }
+                }
+            }
+            Message::GlobalEnvPathInputChanged(path) => {
+                self.global_env_path_input = path;
+                Task::none()
+            }
+            Message::AddGlobalEnvRoot => match GlobalEnvRoot::parse_user_input(&self.global_env_path_input) {
+                Ok(root) => match self.configuration.add_global_env(root) {
+                    Ok(outcome) => {
+                        self.global_env_path_input.clear();
+                        self.workspace.sync_with_configuration(&self.configuration);
+                        self.persist_state();
+                        self.update_status_with_missing(outcome.status_message());
+                        match outcome {
+                            GlobalEnvChangeOutcome::AddedRescan => {
+                                self.last_scan = Some(Instant::now());
+                                self.rescan_files()
+                            }
+                            GlobalEnvChangeOutcome::AddedIdle
+                            | GlobalEnvChangeOutcome::RemovedRescan
+                            | GlobalEnvChangeOutcome::RemovedIdle => Task::none(),
+                        }
+                    }
+                    Err(err) => {
+                        self.update_status_with_missing(&err.to_string());
+                        Task::none()
+                    }
+                },
+                Err(err) => {
+                    self.update_status_with_missing(&err.to_string());
                     Task::none()
+                }
+            },
+            Message::RemoveGlobalEnvRoot(root) => {
+                let Ok(outcome) = self.configuration.remove_global_env(&root) else {
+                    return Task::none();
+                };
+                self.workspace.sync_with_configuration(&self.configuration);
+                if !self.should_scan() {
+                    self.workspace.clear_scan_cache();
+                }
+                self.persist_state();
+                self.refresh_visible_environments();
+                self.update_status_with_missing(outcome.status_message());
+                match outcome {
+                    GlobalEnvChangeOutcome::RemovedRescan => {
+                        self.last_scan = Some(Instant::now());
+                        self.rescan_files()
+                    }
+                    GlobalEnvChangeOutcome::AddedRescan
+                    | GlobalEnvChangeOutcome::AddedIdle
+                    | GlobalEnvChangeOutcome::RemovedIdle => Task::none(),
                 }
             }
         }

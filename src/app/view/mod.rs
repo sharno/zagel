@@ -37,12 +37,12 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
 
     let grid = PaneGrid::new(&app_ref.panes, move |_, pane, _| match pane {
         PaneContent::Sidebar => pane_grid::Content::new(sidebar(SidebarContext {
-            http_files: &app_ref.http_files,
-            http_file_order: &app_ref.http_file_order,
-            selection: app_ref.selection.as_ref(),
+            http_files: app_ref.workspace.http_files(),
+            http_file_order: app_ref.workspace.http_file_order(),
+            selection: app_ref.workspace.selection(),
             collapsed: &app_ref.collapsed_collections,
-            project_roots: &app_ref.project_roots,
-            global_env_roots: &app_ref.global_env_roots,
+            project_roots: app_ref.project_roots(),
+            global_env_roots: app_ref.global_env_roots(),
             project_path_input: &app_ref.project_path_input,
             global_env_path_input: &app_ref.global_env_path_input,
             edit_state: &app_ref.edit_state,
