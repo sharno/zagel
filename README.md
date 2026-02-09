@@ -31,6 +31,35 @@ Release build:
 cargo build --release
 ```
 
+## Nix / nixci
+
+This repo now includes a `flake.nix` so nix-based CI can run `nix flake check`
+directly.
+
+Local verification:
+
+```bash
+nix flake check
+```
+
+For an interactive shell with Rust + Linux GUI deps:
+
+```bash
+nix develop
+cargo test --locked
+```
+
+### WSL setup (Ubuntu)
+
+If you want local parity on Windows, install Nix in WSL and run checks there:
+
+```bash
+wsl -d Ubuntu
+curl -fsSL https://install.determinate.systems/nix | sh -s -- install
+cd /mnt/c/Users/sharno/projects/zagel
+nix flake check
+```
+
 ## `.http` file format
 
 Zagel treats each request as a block. Blocks are separated by lines starting with `###`.
