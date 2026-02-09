@@ -670,6 +670,14 @@ impl Zagel {
                 {
                     self.selection = None;
                 }
+                if let EditState::On { selection } = &mut self.edit_state {
+                    selection.retain(|target| match target {
+                        EditTarget::Collection(path) => !path.starts_with(root.as_path()),
+                        EditTarget::Request(RequestId::HttpFile { path, .. }) => {
+                            !path.starts_with(root.as_path())
+                        }
+                    });
+                }
                 self.refresh_visible_environments();
 
                 self.persist_state();
