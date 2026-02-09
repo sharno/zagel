@@ -70,21 +70,61 @@ pub struct Zagel {
     pub(super) collapsed_collections: BTreeSet<String>,
 }
 
+fn load_configured_roots(state: &AppState) -> (Vec<ProjectRoot>, Vec<GlobalEnvRoot>, Vec<String>) {
+    let mut startup_warnings = Vec::new();
+
+    let mut project_roots = Vec::new();
+    for path in &state.project_roots {
+        match ProjectRoot::from_stored(path.clone()) {
+            Ok(root) => project_roots.push(root),
+            Err(err) => startup_warnings.push(format!(
+                "Ignoring saved project folder {}: {err}",
+                path.display()
+            )),
+        }
+    }
+
+    let mut global_env_roots = Vec::new();
+    for path in &state.global_env_roots {
+        match GlobalEnvRoot::from_stored(path.clone()) {
+            Ok(root) => global_env_roots.push(root),
+            Err(err) => startup_warnings.push(format!(
+                "Ignoring saved global env folder {}: {err}",
+                path.display()
+            )),
+        }
+    }
+
+    (project_roots, global_env_roots, startup_warnings)
+}
+
+fn startup_status_line(
+    startup_warnings: &[String],
+    project_roots: &[ProjectRoot],
+    global_env_roots: &[GlobalEnvRoot],
+) -> String {
+    let startup_warning_summary = (!startup_warnings.is_empty()).then(|| {
+        format!(
+            "Ignored {} invalid saved folder(s).",
+            startup_warnings.len()
+        )
+    });
+    let has_any_root = !(project_roots.is_empty() && global_env_roots.is_empty());
+
+    match (startup_warning_summary, has_any_root) {
+        (Some(summary), false) => format!("{summary} Add a project folder to start."),
+        (Some(summary), true) => summary,
+        (None, false) => "No projects configured. Add a project folder to start.".to_string(),
+        (None, true) => "Ready".to_string(),
+    }
+}
+
 impl Zagel {
     pub(super) fn init() -> (Self, Task<Message>) {
         let state = AppState::load();
-        let project_roots = state
-            .project_roots
-            .iter()
-            .cloned()
-            .filter_map(ProjectRoot::from_stored)
-            .collect::<Vec<_>>();
-        let global_env_roots = state
-            .global_env_roots
-            .iter()
-            .cloned()
-            .filter_map(GlobalEnvRoot::from_stored)
-            .collect::<Vec<_>>();
+        let (project_roots, global_env_roots, startup_warnings) = load_configured_roots(&state);
+        let initial_status_line =
+            startup_status_line(&startup_warnings, &project_roots, &global_env_roots);
 
         let (mut panes, sidebar) = pane_grid::State::new(super::view::PaneContent::Sidebar);
         let split = panes.split(
@@ -122,7 +162,7 @@ impl Zagel {
             edit_state: EditState::default(),
             draft: RequestDraft::default(),
             body_editor: iced::widget::text_editor::Content::with_text(""),
-            status_line: "No projects configured. Add a project folder to start.".to_string(),
+            status_line: initial_status_line,
             response: None,
             all_environments: Vec::new(),
             environments: vec![default_environment()],
@@ -152,9 +192,15 @@ impl Zagel {
             collapsed_collections: BTreeSet::new(),
         };
 
+        for warning in &startup_warnings {
+            eprintln!("startup: {warning}");
+        }
+
         app.refresh_visible_environments();
         let task = if app.should_scan() {
-            app.update_status_with_missing("Ready");
+            if startup_warnings.is_empty() {
+                app.update_status_with_missing("Ready");
+            }
             app.rescan_files()
         } else {
             Task::none()
@@ -263,7 +309,8 @@ impl Zagel {
         self.project_roots.first()
     }
 
-    pub(super) const fn should_scan(&self) -> bool {
+    #[allow(clippy::missing_const_for_fn)]
+    pub(super) fn should_scan(&self) -> bool {
         !(self.project_roots.is_empty() && self.global_env_roots.is_empty())
     }
 

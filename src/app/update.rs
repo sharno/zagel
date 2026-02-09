@@ -599,10 +599,13 @@ impl Zagel {
                         RequestId::HttpFile { path, .. } => self.project_root_for_path(path),
                     })
                     .or_else(|| self.default_project_root())
-                    .map_or_else(
-                        || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                        ProjectRoot::to_path_buf,
+                    .map(ProjectRoot::to_path_buf);
+                let Some(root) = root else {
+                    self.update_status_with_missing(
+                        "No project configured. Add a project folder first.",
                     );
+                    return Task::none();
+                };
 
                 self.update_status_with_missing("Saving...");
                 Task::perform(

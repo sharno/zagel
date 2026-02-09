@@ -52,8 +52,8 @@ impl ProjectRoot {
         DirectoryRoot::parse_user_input(input).map(Self)
     }
 
-    pub fn from_stored(path: PathBuf) -> Option<Self> {
-        DirectoryRoot::from_path(path).ok().map(Self)
+    pub fn from_stored(path: PathBuf) -> Result<Self, RootPathError> {
+        DirectoryRoot::from_path(path).map(Self)
     }
 
     pub fn as_path(&self) -> &Path {
@@ -73,8 +73,8 @@ impl GlobalEnvRoot {
         DirectoryRoot::parse_user_input(input).map(Self)
     }
 
-    pub fn from_stored(path: PathBuf) -> Option<Self> {
-        DirectoryRoot::from_path(path).ok().map(Self)
+    pub fn from_stored(path: PathBuf) -> Result<Self, RootPathError> {
+        DirectoryRoot::from_path(path).map(Self)
     }
 
     pub fn as_path(&self) -> &Path {
@@ -201,6 +201,6 @@ mod tests {
         let file_path = dir.path().join("file.txt");
         std::fs::write(&file_path, "x").expect("write file");
 
-        assert!(ProjectRoot::from_stored(file_path).is_none());
+        assert!(ProjectRoot::from_stored(file_path).is_err());
     }
 }
