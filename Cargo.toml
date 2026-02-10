@@ -37,6 +37,7 @@ base64 = "0.22.1"
 notify = "8.2.0"
 scraper = "0.20"
 ego-tree = "0.6"
+vec1 = "1.12.1"
 
 [dev-dependencies]
 tempfile = "3.12.0"

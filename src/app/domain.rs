@@ -5,63 +5,16 @@ use std::path::{Path, PathBuf};
 
 use crate::model::{Environment, HttpFile, RequestDraft, RequestId};
 use crate::pathing::{GlobalEnvRoot, ProjectRoot, SavePathError};
+use vec1::Vec1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonEmptyVec<T> {
-    values: Vec<T>,
-}
-
-impl<T> NonEmptyVec<T> {
-    pub fn new(first: T) -> Self {
-        Self {
-            values: vec![first],
-        }
+fn vec1_from_vec<T>(values: Vec<T>) -> Option<Vec1<T>> {
+    let mut iter = values.into_iter();
+    let first = iter.next()?;
+    let mut non_empty = Vec1::new(first);
+    for value in iter {
+        non_empty.push(value);
     }
-
-    pub fn from_vec(values: Vec<T>) -> Option<Self> {
-        if values.is_empty() {
-            None
-        } else {
-            Some(Self { values })
-        }
-    }
-
-    pub fn as_slice(&self) -> &[T] {
-        &self.values
-    }
-
-    pub fn first(&self) -> &T {
-        &self.values[0]
-    }
-
-    pub fn push(&mut self, value: T) {
-        self.values.push(value);
-    }
-}
-
-impl<T: PartialEq> NonEmptyVec<T> {
-    pub fn contains(&self, value: &T) -> bool {
-        self.values.contains(value)
-    }
-
-    pub fn remove(&mut self, value: &T) -> RemoveOutcome {
-        let Some(index) = self.values.iter().position(|candidate| candidate == value) else {
-            return RemoveOutcome::NotFound;
-        };
-        self.values.remove(index);
-        if self.values.is_empty() {
-            RemoveOutcome::RemovedAndEmpty
-        } else {
-            RemoveOutcome::RemovedStillNonEmpty
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RemoveOutcome {
-    NotFound,
-    RemovedStillNonEmpty,
-    RemovedAndEmpty,
+    Some(non_empty)
 }
 
 #[derive(Debug, Clone)]
@@ -70,7 +23,7 @@ pub enum ProjectConfiguration {
         global_env_roots: Vec<GlobalEnvRoot>,
     },
     Configured {
-        project_roots: NonEmptyVec<ProjectRoot>,
+        project_roots: Vec1<ProjectRoot>,
         global_env_roots: Vec<GlobalEnvRoot>,
     },
 }
@@ -80,7 +33,7 @@ impl ProjectConfiguration {
         project_roots: Vec<ProjectRoot>,
         global_env_roots: Vec<GlobalEnvRoot>,
     ) -> Self {
-        match NonEmptyVec::from_vec(project_roots) {
+        match vec1_from_vec(project_roots) {
             Some(project_roots) => Self::Configured {
                 project_roots,
                 global_env_roots,
@@ -96,7 +49,7 @@ impl ProjectConfiguration {
     pub fn project_roots(&self) -> &[ProjectRoot] {
         match self {
             Self::Unconfigured { .. } => &[],
-            Self::Configured { project_roots, .. } => project_roots.as_slice(),
+            Self::Configured { project_roots, .. } => project_roots.as_ref(),
         }
     }
 
@@ -153,7 +106,7 @@ impl ProjectConfiguration {
             Self::Unconfigured { global_env_roots } => {
                 let globals = mem::take(global_env_roots);
                 *self = Self::Configured {
-                    project_roots: NonEmptyVec::new(root),
+                    project_roots: Vec1::new(root),
                     global_env_roots: globals,
                 };
                 Ok(ProjectChangeOutcome::AddedAndScan)
@@ -177,17 +130,24 @@ impl ProjectConfiguration {
             Self::Configured {
                 project_roots,
                 global_env_roots,
-            } => match project_roots.remove(root) {
-                RemoveOutcome::NotFound => Err(RootOpError::ProjectMissing),
-                RemoveOutcome::RemovedStillNonEmpty => Ok(ProjectChangeOutcome::RemovedAndScan),
-                RemoveOutcome::RemovedAndEmpty => {
+            } => {
+                let mut remaining = project_roots.iter().cloned().collect::<Vec<_>>();
+                let before_len = remaining.len();
+                remaining.retain(|candidate| candidate != root);
+                if remaining.len() == before_len {
+                    return Err(RootOpError::ProjectMissing);
+                }
+                if remaining.is_empty() {
                     let globals = mem::take(global_env_roots);
                     *self = Self::Unconfigured {
                         global_env_roots: globals,
                     };
                     Ok(ProjectChangeOutcome::RemovedLastProject)
+                } else {
+                    *project_roots = vec1_from_vec(remaining).expect("non-empty");
+                    Ok(ProjectChangeOutcome::RemovedAndScan)
                 }
-            },
+            }
         }
     }
 

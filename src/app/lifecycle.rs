@@ -472,7 +472,7 @@ impl Zagel {
 
 pub fn run() -> iced::Result {
     application(Zagel::init, Zagel::update, view::view)
-        .title("Zagel \u{0007} REST workbench")
+        .title("Zagel - REST workbench")
         .subscription(Zagel::subscription)
         .theme(Zagel::theme)
         .run()
