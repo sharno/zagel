@@ -285,13 +285,12 @@ pub struct ConfiguredWorkspaceState<'a> {
     workspace: &'a mut ConfiguredWorkspace,
 }
 
-#[allow(clippy::missing_const_for_fn)]
 impl ConfiguredWorkspaceState<'_> {
-    pub fn http_files(&self) -> &HashMap<PathBuf, HttpFile> {
+    pub const fn http_files(&self) -> &HashMap<PathBuf, HttpFile> {
         &self.workspace.http_files
     }
 
-    pub fn http_files_mut(&mut self) -> &mut HashMap<PathBuf, HttpFile> {
+    pub const fn http_files_mut(&mut self) -> &mut HashMap<PathBuf, HttpFile> {
         &mut self.workspace.http_files
     }
 
@@ -299,11 +298,11 @@ impl ConfiguredWorkspaceState<'_> {
         self.workspace.http_files = files;
     }
 
-    pub fn http_file_order(&self) -> &[PathBuf] {
+    pub const fn http_file_order(&self) -> &Vec<PathBuf> {
         &self.workspace.http_file_order
     }
 
-    pub fn http_file_order_mut(&mut self) -> &mut Vec<PathBuf> {
+    pub const fn http_file_order_mut(&mut self) -> &mut Vec<PathBuf> {
         &mut self.workspace.http_file_order
     }
 
@@ -311,7 +310,7 @@ impl ConfiguredWorkspaceState<'_> {
         self.workspace.selection.clone()
     }
 
-    pub fn selection_mut(&mut self) -> &mut Option<RequestId> {
+    pub const fn selection_mut(&mut self) -> &mut Option<RequestId> {
         &mut self.workspace.selection
     }
 
@@ -320,7 +319,6 @@ impl ConfiguredWorkspaceState<'_> {
     }
 }
 
-#[allow(clippy::missing_const_for_fn)]
 impl WorkspaceState {
     pub fn from_config(configuration: &ProjectConfiguration, saved_http_order: Vec<PathBuf>) -> Self {
         if configuration.should_scan() {
@@ -352,7 +350,7 @@ impl WorkspaceState {
         }
     }
 
-    pub fn configured_state(&mut self) -> Option<ConfiguredWorkspaceState<'_>> {
+    pub const fn configured_state(&mut self) -> Option<ConfiguredWorkspaceState<'_>> {
         match self {
             Self::Configured(workspace) => Some(ConfiguredWorkspaceState { workspace }),
             Self::Unconfigured(_) => None,
@@ -371,7 +369,7 @@ impl WorkspaceState {
         }
     }
 
-    pub fn configured_mut(&mut self) -> Option<&mut ConfiguredWorkspace> {
+    pub const fn configured_mut(&mut self) -> Option<&mut ConfiguredWorkspace> {
         match self {
             Self::Configured(workspace) => Some(workspace),
             Self::Unconfigured(_) => None,
@@ -382,14 +380,14 @@ impl WorkspaceState {
         *self = Self::Unconfigured(UnconfiguredWorkspace::default());
     }
 
-    pub fn http_files(&self) -> &HashMap<PathBuf, HttpFile> {
+    pub const fn http_files(&self) -> &HashMap<PathBuf, HttpFile> {
         match self {
             Self::Configured(workspace) => &workspace.http_files,
             Self::Unconfigured(workspace) => &workspace.http_files,
         }
     }
 
-    pub fn http_file_order(&self) -> &[PathBuf] {
+    pub const fn http_file_order(&self) -> &Vec<PathBuf> {
         match self {
             Self::Configured(workspace) => &workspace.http_file_order,
             Self::Unconfigured(workspace) => &workspace.http_file_order,
@@ -414,7 +412,7 @@ impl WorkspaceState {
         self.set_selection(None);
     }
 
-    pub fn all_environments(&self) -> &[Environment] {
+    pub const fn all_environments(&self) -> &Vec<Environment> {
         match self {
             Self::Configured(workspace) => &workspace.all_environments,
             Self::Unconfigured(workspace) => &workspace.all_environments,

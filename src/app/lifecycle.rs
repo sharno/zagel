@@ -45,8 +45,7 @@ enum StartupStatus {
 }
 
 impl StartupStatus {
-    #[allow(clippy::missing_const_for_fn)]
-    fn from_context(startup_warnings: &[String], configuration: &ProjectConfiguration) -> Self {
+    const fn from_context(startup_warnings: &[String], configuration: &ProjectConfiguration) -> Self {
         match (startup_warnings.is_empty(), configuration.should_scan()) {
             (true, true) => Self::Ready,
             (true, false) => Self::NeedsProject,
@@ -259,7 +258,9 @@ impl Zagel {
         state.project_roots = self.project_root_paths();
         state.global_env_roots = self.global_env_root_paths();
         state.http_root = state.project_roots.first().cloned();
-        state.http_file_order = self.workspace.http_file_order().to_vec();
+        state
+            .http_file_order
+            .clone_from(self.workspace.http_file_order());
         self.state = state.clone();
         state.save();
     }
