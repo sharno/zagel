@@ -281,6 +281,45 @@ pub enum WorkspaceState {
     Configured(ConfiguredWorkspace),
 }
 
+pub struct ConfiguredWorkspaceState<'a> {
+    workspace: &'a mut ConfiguredWorkspace,
+}
+
+#[allow(clippy::missing_const_for_fn)]
+impl ConfiguredWorkspaceState<'_> {
+    pub fn http_files(&self) -> &HashMap<PathBuf, HttpFile> {
+        &self.workspace.http_files
+    }
+
+    pub fn http_files_mut(&mut self) -> &mut HashMap<PathBuf, HttpFile> {
+        &mut self.workspace.http_files
+    }
+
+    pub fn replace_http_files(&mut self, files: HashMap<PathBuf, HttpFile>) {
+        self.workspace.http_files = files;
+    }
+
+    pub fn http_file_order(&self) -> &[PathBuf] {
+        &self.workspace.http_file_order
+    }
+
+    pub fn http_file_order_mut(&mut self) -> &mut Vec<PathBuf> {
+        &mut self.workspace.http_file_order
+    }
+
+    pub fn selection_cloned(&self) -> Option<RequestId> {
+        self.workspace.selection.clone()
+    }
+
+    pub fn selection_mut(&mut self) -> &mut Option<RequestId> {
+        &mut self.workspace.selection
+    }
+
+    pub fn set_selection(&mut self, selection: Option<RequestId>) {
+        self.workspace.selection = selection;
+    }
+}
+
 #[allow(clippy::missing_const_for_fn)]
 impl WorkspaceState {
     pub fn from_config(configuration: &ProjectConfiguration, saved_http_order: Vec<PathBuf>) -> Self {
@@ -311,6 +350,18 @@ impl WorkspaceState {
             Self::Configured(workspace) => workspace,
             Self::Unconfigured(_) => unreachable!("workspace forced to configured"),
         }
+    }
+
+    pub fn configured_state(&mut self) -> Option<ConfiguredWorkspaceState<'_>> {
+        match self {
+            Self::Configured(workspace) => Some(ConfiguredWorkspaceState { workspace }),
+            Self::Unconfigured(_) => None,
+        }
+    }
+
+    pub fn ensured_configured_state(&mut self) -> ConfiguredWorkspaceState<'_> {
+        let workspace = self.ensure_configured();
+        ConfiguredWorkspaceState { workspace }
     }
 
     pub const fn configured(&self) -> Option<&ConfiguredWorkspace> {

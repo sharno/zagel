@@ -2,22 +2,94 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use std::marker::PhantomData;
 
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
 
-use crate::model::{Method, RequestId, ResponsePreview};
+use crate::model::{Method, RequestDraft, RequestId, ResponsePreview};
 use crate::net::send_request;
 use crate::parser::{persist_request, write_http_file};
 use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 
-use super::domain::{GlobalEnvChangeOutcome, ProjectChangeOutcome};
+use super::domain::{
+    AddRequestPlan, GlobalEnvChangeOutcome, ProjectChangeOutcome, SavePlan,
+};
 use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
 use super::status::status_with_missing;
 use super::{EditState, EditTarget, HeaderRow, Message, Zagel};
 
 const MIN_SPLIT_RATIO: f32 = 0.2;
 const FILE_SCAN_DEBOUNCE: Duration = Duration::from_millis(300);
+
+struct Unplanned;
+struct Planned;
+
+struct SaveFlow<State> {
+    plan: SavePlan,
+    marker: PhantomData<State>,
+}
+
+impl SaveFlow<Unplanned> {
+    fn from_app(app: &Zagel) -> Result<Self, String> {
+        app.build_save_plan().map(|plan| Self {
+            plan,
+            marker: PhantomData,
+        }).map_err(|err| err.to_string())
+    }
+
+    fn into_planned(self) -> SaveFlow<Planned> {
+        SaveFlow {
+            plan: self.plan,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl SaveFlow<Planned> {
+    fn into_task(self) -> Task<Message> {
+        let (root, selection, draft, explicit_path) = self.plan.into_persist_args();
+        Task::perform(
+            async move {
+                persist_request(root, selection, draft, explicit_path)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            Message::Saved,
+        )
+    }
+}
+
+struct AddRequestFlow<State> {
+    plan: AddRequestPlan,
+    marker: PhantomData<State>,
+}
+
+impl AddRequestFlow<Unplanned> {
+    fn from_app(app: &Zagel) -> Result<Self, String> {
+        app.build_add_request_plan().map(|plan| Self {
+            plan,
+            marker: PhantomData,
+        }).map_err(|err| err.to_string())
+    }
+
+    fn into_planned(self) -> AddRequestFlow<Planned> {
+        AddRequestFlow {
+            plan: self.plan,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl AddRequestFlow<Planned> {
+    fn into_parts(self) -> (PathBuf, RequestDraft, PathBuf) {
+        (
+            self.plan.file_path,
+            self.plan.new_draft,
+            self.plan.project_root,
+        )
+    }
+}
 
 fn clamp_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, 1.0 - MIN_SPLIT_RATIO)
@@ -129,26 +201,31 @@ impl Zagel {
                 if !self.should_scan() {
                     return Task::none();
                 }
-                let workspace = self.workspace.ensure_configured();
-                workspace.http_files = files;
-                workspace
-                    .http_file_order
-                    .retain(|path| workspace.http_files.contains_key(path));
-                let mut new_paths: Vec<PathBuf> = workspace
-                    .http_files
+                let mut workspace = self.workspace.ensured_configured_state();
+                workspace.replace_http_files(files);
+                let loaded_paths = workspace
+                    .http_files()
                     .keys()
-                    .filter(|path| !workspace.http_file_order.contains(path))
+                    .cloned()
+                    .collect::<HashSet<PathBuf>>();
+                workspace
+                    .http_file_order_mut()
+                    .retain(|path| loaded_paths.contains(path));
+                let mut new_paths: Vec<PathBuf> = workspace
+                    .http_files()
+                    .keys()
+                    .filter(|path| !workspace.http_file_order().contains(path))
                     .cloned()
                     .collect();
                 new_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-                workspace.http_file_order.extend(new_paths);
-                if let Some(RequestId::HttpFile { path, index }) = workspace.selection.clone()
+                workspace.http_file_order_mut().extend(new_paths);
+                if let Some(RequestId::HttpFile { path, index }) = workspace.selection_cloned()
                     && workspace
-                        .http_files
+                        .http_files()
                         .get(&path)
                         .is_none_or(|file| index >= file.requests.len())
                 {
-                    workspace.selection = None;
+                    workspace.set_selection(None);
                 }
                 self.refresh_visible_environments();
                 Task::none()
@@ -205,7 +282,7 @@ impl Zagel {
                 };
 
                 let errors = {
-                    let Some(workspace) = self.workspace.configured_mut() else {
+                    let Some(mut workspace) = self.workspace.configured_state() else {
                         return Task::none();
                     };
 
@@ -241,7 +318,7 @@ impl Zagel {
                     let mut errors = Vec::new();
 
                     for (path, mut indices) in file_request_removals {
-                        if let Some(file) = workspace.http_files.get_mut(&path) {
+                        if let Some(file) = workspace.http_files_mut().get_mut(&path) {
                             let mut updated_requests = file.requests.clone();
                             indices.sort_unstable();
                             indices.dedup();
@@ -270,21 +347,21 @@ impl Zagel {
                                 errors.push(format!("Failed to delete {}: {}", path.display(), err));
                             }
                         }
-                        workspace.http_files.remove(path);
+                        workspace.http_files_mut().remove(path);
                     }
                     if !remove_file_paths.is_empty() {
                         workspace
-                            .http_file_order
+                            .http_file_order_mut()
                             .retain(|path| !remove_files_set.contains(path));
                     }
 
-                    if let Some(RequestId::HttpFile { path, index }) = workspace.selection.clone()
+                    if let Some(RequestId::HttpFile { path, index }) = workspace.selection_cloned()
                         && workspace
-                            .http_files
+                            .http_files()
                             .get(&path)
                             .is_none_or(|file| index >= file.requests.len())
                     {
-                        workspace.selection = None;
+                        workspace.set_selection(None);
                     }
 
                     errors
@@ -304,20 +381,20 @@ impl Zagel {
                 Task::none()
             }
             Message::MoveCollectionUp(path) => {
-                if let Some(workspace) = self.workspace.configured_mut()
-                    && let Some(pos) = workspace.http_file_order.iter().position(|p| p == &path)
+                if let Some(mut workspace) = self.workspace.configured_state()
+                    && let Some(pos) = workspace.http_file_order().iter().position(|p| p == &path)
                     && pos > 0
                 {
-                    workspace.http_file_order.swap(pos, pos - 1);
+                    workspace.http_file_order_mut().swap(pos, pos - 1);
                 }
                 Task::none()
             }
             Message::MoveCollectionDown(path) => {
-                if let Some(workspace) = self.workspace.configured_mut()
-                    && let Some(pos) = workspace.http_file_order.iter().position(|p| p == &path)
-                    && pos + 1 < workspace.http_file_order.len()
+                if let Some(mut workspace) = self.workspace.configured_state()
+                    && let Some(pos) = workspace.http_file_order().iter().position(|p| p == &path)
+                    && pos + 1 < workspace.http_file_order().len()
                 {
-                    workspace.http_file_order.swap(pos, pos + 1);
+                    workspace.http_file_order_mut().swap(pos, pos + 1);
                 }
                 Task::none()
             }
@@ -326,12 +403,12 @@ impl Zagel {
                 if *index == 0 {
                     return Task::none();
                 }
-                let Some(workspace) = self.workspace.configured_mut() else {
+                let Some(mut workspace) = self.workspace.configured_state() else {
                     return Task::none();
                 };
                 let mut new_index = None;
                 let mut status_error = None;
-                if let Some(file) = workspace.http_files.get_mut(path)
+                if let Some(file) = workspace.http_files_mut().get_mut(path)
                     && *index < file.requests.len()
                 {
                     let updated_index = *index - 1;
@@ -346,7 +423,7 @@ impl Zagel {
                 }
                 if let Some(updated_index) = new_index {
                     swap_request_indices_in_selection_http(
-                        &mut workspace.selection,
+                        workspace.selection_mut(),
                         path,
                         *index,
                         updated_index,
@@ -365,12 +442,12 @@ impl Zagel {
             }
             Message::MoveRequestDown(id) => {
                 let RequestId::HttpFile { path, index } = &id;
-                let Some(workspace) = self.workspace.configured_mut() else {
+                let Some(mut workspace) = self.workspace.configured_state() else {
                     return Task::none();
                 };
                 let mut new_index = None;
                 let mut status_error = None;
-                if let Some(file) = workspace.http_files.get_mut(path)
+                if let Some(file) = workspace.http_files_mut().get_mut(path)
                     && *index + 1 < file.requests.len()
                 {
                     let updated_index = *index + 1;
@@ -385,7 +462,7 @@ impl Zagel {
                 }
                 if let Some(updated_index) = new_index {
                     swap_request_indices_in_selection_http(
-                        &mut workspace.selection,
+                        workspace.selection_mut(),
                         path,
                         *index,
                         updated_index,
@@ -516,34 +593,32 @@ impl Zagel {
             }
             Message::CopyComplete => Task::none(),
             Message::AddRequest => {
-                let plan = match self.build_add_request_plan() {
-                    Ok(plan) => plan,
+                let planned = match AddRequestFlow::<Unplanned>::from_app(self) {
+                    Ok(flow) => flow.into_planned(),
                     Err(err) => {
-                        self.update_status_with_missing(&err.to_string());
+                        self.update_status_with_missing(&err);
                         return Task::none();
                     }
                 };
 
-                let path = plan.file_path.clone();
-                let draft = plan.new_draft.clone();
-                let Some(workspace) = self.workspace.configured_mut() else {
-                    self.update_status_with_missing("Select a file to add a request");
-                    return Task::none();
-                };
-                let Some(file) = workspace.http_files.get_mut(&path) else {
-                    self.update_status_with_missing("Select a file to add a request");
-                    return Task::none();
-                };
+                let (path, draft, project_root) = planned.into_parts();
+                let mut workspace = self
+                    .workspace
+                    .configured_state()
+                    .expect("add-request flow requires configured workspace");
+                let file = workspace
+                    .http_files_mut()
+                    .get_mut(&path)
+                    .expect("add-request flow requires selected file to be loaded");
 
                 file.requests.push(draft.clone());
                 let new_idx = file.requests.len() - 1;
-                workspace.selection = Some(RequestId::HttpFile {
+                workspace.set_selection(Some(RequestId::HttpFile {
                     path: path.clone(),
                     index: new_idx,
-                });
+                }));
                 self.update_status_with_missing("Saving new request...");
 
-                let project_root = plan.project_root;
                 Task::perform(
                     async move {
                         persist_request(project_root, None, draft, Some(path))
@@ -606,23 +681,15 @@ impl Zagel {
                 Task::none()
             }
             Message::Save => {
-                let plan = match self.build_save_plan() {
-                    Ok(plan) => plan,
+                let planned = match SaveFlow::<Unplanned>::from_app(self) {
+                    Ok(flow) => flow.into_planned(),
                     Err(err) => {
-                        self.update_status_with_missing(&err.to_string());
+                        self.update_status_with_missing(&err);
                         return Task::none();
                     }
                 };
-                let (root, selection, draft, explicit_path) = plan.into_persist_args();
                 self.update_status_with_missing("Saving...");
-                Task::perform(
-                    async move {
-                        persist_request(root, selection, draft, explicit_path)
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
-                    Message::Saved,
-                )
+                planned.into_task()
             }
             Message::Saved(result) => match result {
                 Ok((path, index)) => {
