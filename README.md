@@ -54,7 +54,7 @@ If you want local parity on Windows, install Nix in WSL and run checks there:
 ```bash
 wsl -d Ubuntu
 curl -fsSL https://install.determinate.systems/nix | sh -s -- install
-cd /mnt/c/Users/sharno/projects/zagel
+cd /mnt/c/Users/<your-user>/projects/zagel
 nix flake check
 ```
 

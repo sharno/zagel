@@ -56,6 +56,10 @@
             ]
             ++ nativeBuildDeps
             ++ runtimeDeps;
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+            runtimeDeps
+            ++ [ pkgs.stdenv.cc.cc ]
+          );
           env.RUST_BACKTRACE = "1";
         };
 
