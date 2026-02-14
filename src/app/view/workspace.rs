@@ -103,7 +103,7 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
         .padding(4)
         .width(Length::FillPortion(5));
 
-    let save_path_row: Element<'_, Message> = match &app.selection {
+    let save_path_row: Element<'_, Message> = match app.workspace.selection() {
         Some(RequestId::HttpFile { path, .. }) => row![
             container(text("Saving to").size(14)).width(Length::Fixed(LABEL_WIDTH)),
             container(text(path.display().to_string()).size(14)).width(Length::Fill)

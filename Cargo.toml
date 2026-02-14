@@ -2,6 +2,7 @@
 name = "zagel"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Desktop REST workbench with .http/.env collections and persisted state."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sharno/zagel"
@@ -36,6 +37,7 @@ base64 = "0.22.1"
 notify = "8.2.0"
 scraper = "0.20"
 ego-tree = "0.6"
+vec1 = "1.12.1"
 
 [dev-dependencies]
 tempfile = "3.12.0"

@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::{Environment, RequestDraft};
+use crate::model::{Environment, EnvironmentScope, RequestDraft};
 
 pub(super) fn default_environment() -> Environment {
     Environment {
         name: "No environment".to_string(),
         vars: BTreeMap::new(),
+        scope: EnvironmentScope::Default,
     }
 }
 

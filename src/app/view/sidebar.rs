@@ -1,11 +1,13 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length};
 
-use super::section;
+use crate::pathing::{GlobalEnvRoot, ProjectRoot};
+
 use super::super::{EditState, EditTarget, Message};
+use super::section;
 use crate::model::{HttpFile, RequestDraft, RequestId};
 
 const INDENT: i16 = 10;
@@ -69,7 +71,10 @@ pub struct SidebarContext<'a> {
     pub http_file_order: &'a [PathBuf],
     pub selection: Option<&'a RequestId>,
     pub collapsed: &'a BTreeSet<String>,
-    pub http_root: &'a Path,
+    pub project_roots: &'a [ProjectRoot],
+    pub global_env_roots: &'a [GlobalEnvRoot],
+    pub project_path_input: &'a str,
+    pub global_env_path_input: &'a str,
     pub edit_state: &'a EditState,
     pub icon_set: IconSet,
 }
@@ -99,12 +104,58 @@ struct RequestItem {
     draft: RequestDraft,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     let (editing, edit_selection) = match ctx.edit_state {
         EditState::On { selection } => (true, Some(selection)),
         EditState::Off => (false, None),
     };
     let icons = ctx.icon_set.icons();
+
+    let project_input = text_input("C:/path/to/project", ctx.project_path_input)
+        .on_input(Message::ProjectPathInputChanged)
+        .padding(4)
+        .width(Length::FillPortion(4));
+    let add_project = button("Add project").on_press(Message::AddProject);
+
+    let mut project_roots = column![row![project_input, add_project].spacing(6)].spacing(6);
+    if ctx.project_roots.is_empty() {
+        project_roots = project_roots.push(text("No projects configured").size(13));
+    } else {
+        for root in ctx.project_roots {
+            project_roots = project_roots.push(
+                row![
+                    text(root.as_path().display().to_string()).size(13),
+                    button("Remove").on_press(Message::RemoveProject(root.clone())),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(6),
+            );
+        }
+    }
+
+    let global_env_input = text_input("C:/path/to/global/envs", ctx.global_env_path_input)
+        .on_input(Message::GlobalEnvPathInputChanged)
+        .padding(4)
+        .width(Length::FillPortion(4));
+    let add_global = button("Add global envs").on_press(Message::AddGlobalEnvRoot);
+
+    let mut global_env_roots = column![row![global_env_input, add_global].spacing(6)].spacing(6);
+    if ctx.global_env_roots.is_empty() {
+        global_env_roots = global_env_roots.push(text("No global env folders").size(13));
+    } else {
+        for root in ctx.global_env_roots {
+            global_env_roots = global_env_roots.push(
+                row![
+                    text(root.as_path().display().to_string()).size(13),
+                    button("Remove").on_press(Message::RemoveGlobalEnvRoot(root.clone())),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(6),
+            );
+        }
+    }
+
     let mut header = row![
         text("Requests").size(20),
         button("Add").on_press(Message::AddRequest)
@@ -126,18 +177,36 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     }
 
     let mut tree = TreeNode::default();
+    for root in ctx.project_roots {
+        let label = root.as_path().display().to_string();
+        insert_collection(
+            &mut tree,
+            &[label.as_str()],
+            None,
+            std::iter::empty::<RequestItem>(),
+        );
+    }
 
     for path in ctx.http_file_order {
         let Some(file) = ctx.http_files.get(path) else {
             continue;
         };
-        let rel_path = file.path.strip_prefix(ctx.http_root).unwrap_or(&file.path);
+        let Some(project_root) = project_root_for_file(&file.path, ctx.project_roots) else {
+            continue;
+        };
+        let rel_path = file
+            .path
+            .strip_prefix(project_root.as_path())
+            .unwrap_or(&file.path);
         let mut segments: Vec<String> = rel_path
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
+        segments.insert(0, project_root.as_path().display().to_string());
         if let Some(last) = segments.last_mut()
-            && let Some(stem) = Path::new(last).file_stem().and_then(|s| s.to_str())
+            && let Some(stem) = std::path::Path::new(last)
+                .file_stem()
+                .and_then(|s| s.to_str())
         {
             *last = stem.to_string();
         }
@@ -166,17 +235,37 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         icons,
     };
     let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(4);
+    let project_section = section("Projects", project_roots.into());
+    let global_env_section = section("Global Environments", global_env_roots.into());
     let collections_section = section("Collections", list.into());
 
-    let list = scrollable(column![header, collections_section].spacing(10))
-        .width(Length::Fill)
-        .height(Length::Fill);
+    let list = scrollable(
+        column![
+            project_section,
+            global_env_section,
+            header,
+            collections_section
+        ]
+        .spacing(10),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill);
 
     container(list)
         .padding(8)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+fn project_root_for_file<'a>(
+    file_path: &std::path::Path,
+    project_roots: &'a [ProjectRoot],
+) -> Option<&'a ProjectRoot> {
+    project_roots
+        .iter()
+        .filter(|root| file_path.starts_with(root.as_path()))
+        .max_by_key(|root| root.as_path().components().count())
 }
 
 fn insert_collection(
@@ -289,8 +378,7 @@ fn collection_row<'a>(
 
     let collection_path = child.node.file_path.clone();
     if ctx.editing
-        && let (Some(edit_selection), Some(collection_path)) =
-            (ctx.edit_selection, collection_path)
+        && let (Some(edit_selection), Some(collection_path)) = (ctx.edit_selection, collection_path)
     {
         let target = EditTarget::Collection(collection_path.clone());
         let label = if edit_selection.contains(&target) {
@@ -299,21 +387,27 @@ fn collection_row<'a>(
             ctx.icons.unchecked
         };
         row_widgets = row_widgets
-            .push(button(text(label))
-                .padding([2, 4])
-                .on_press(Message::ToggleEditSelection(target)))
-            .push(button(text(ctx.icons.move_up))
-                .padding([2, 4])
-                .on_press(Message::MoveCollectionUp(collection_path.clone())))
-            .push(button(text(ctx.icons.move_down))
-                .padding([2, 4])
-                .on_press(Message::MoveCollectionDown(collection_path)));
+            .push(
+                button(text(label))
+                    .padding([2, 4])
+                    .on_press(Message::ToggleEditSelection(target)),
+            )
+            .push(
+                button(text(ctx.icons.move_up))
+                    .padding([2, 4])
+                    .on_press(Message::MoveCollectionUp(collection_path.clone())),
+            )
+            .push(
+                button(text(ctx.icons.move_down))
+                    .padding([2, 4])
+                    .on_press(Message::MoveCollectionDown(collection_path)),
+            );
     }
 
     row_widgets = if let Some(file_path) = &child.node.file_path {
-        let is_selected = ctx.selection.is_some_and(|id| {
-            matches!(id, RequestId::HttpFile { path, .. } if path == file_path)
-        });
+        let is_selected = ctx
+            .selection
+            .is_some_and(|id| matches!(id, RequestId::HttpFile { path, .. } if path == file_path));
 
         let select_id = RequestId::HttpFile {
             path: file_path.clone(),
@@ -346,16 +440,15 @@ fn request_row<'a>(
     let label = if is_selected {
         format!(
             "{} {} • {}",
-            ctx.icons.selected,
-            item.draft.method,
-            item.draft.title
+            ctx.icons.selected, item.draft.method, item.draft.title
         )
     } else {
         format!("{} • {}", item.draft.method, item.draft.title)
     };
-    let mut row_widgets =
-        row![Space::new().width(Length::Fixed(indent_px(depth + 1)))];
-    if ctx.editing && let Some(edit_selection) = ctx.edit_selection {
+    let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth + 1)))];
+    if ctx.editing
+        && let Some(edit_selection) = ctx.edit_selection
+    {
         let target = EditTarget::Request(item.id.clone());
         let select_label = if edit_selection.contains(&target) {
             ctx.icons.checked
@@ -363,15 +456,21 @@ fn request_row<'a>(
             ctx.icons.unchecked
         };
         row_widgets = row_widgets
-            .push(button(text(select_label))
-                .padding([2, 4])
-                .on_press(Message::ToggleEditSelection(target)))
-            .push(button(text(ctx.icons.move_up))
-                .padding([2, 4])
-                .on_press(Message::MoveRequestUp(item.id.clone())))
-            .push(button(text(ctx.icons.move_down))
-                .padding([2, 4])
-                .on_press(Message::MoveRequestDown(item.id.clone())));
+            .push(
+                button(text(select_label))
+                    .padding([2, 4])
+                    .on_press(Message::ToggleEditSelection(target)),
+            )
+            .push(
+                button(text(ctx.icons.move_up))
+                    .padding([2, 4])
+                    .on_press(Message::MoveRequestUp(item.id.clone())),
+            )
+            .push(
+                button(text(ctx.icons.move_down))
+                    .padding([2, 4])
+                    .on_press(Message::MoveRequestDown(item.id.clone())),
+            );
     }
     row_widgets = row_widgets.push(
         button(text(label))

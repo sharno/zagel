@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -80,6 +81,23 @@ impl Default for RequestDraft {
 pub struct Environment {
     pub name: String,
     pub vars: BTreeMap<String, String>,
+    pub scope: EnvironmentScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EnvironmentScope {
+    Project(PathBuf),
+    Global,
+    Default,
+}
+
+impl Environment {
+    pub fn visible_for_project(&self, project_root: Option<&Path>) -> bool {
+        match &self.scope {
+            EnvironmentScope::Project(root) => project_root.is_some_and(|project| project == root),
+            EnvironmentScope::Global | EnvironmentScope::Default => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
