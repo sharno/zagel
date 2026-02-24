@@ -277,7 +277,12 @@ async fn fetch_oauth2_client_credentials_token(
     let access_token = parse_required("OAuth2 access_token", parsed.access_token)?;
     let expires_at = parsed
         .expires_in
-        .map(|seconds| Instant::now() + Duration::from_secs(seconds));
+        .map(|seconds| {
+            Instant::now()
+                .checked_add(Duration::from_secs(seconds))
+                .ok_or_else(|| format!("OAuth2 token expires_in overflow: {seconds}"))
+        })
+        .transpose()?;
 
     Ok(OAuth2AccessToken {
         value: access_token,
