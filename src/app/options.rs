@@ -26,10 +26,17 @@ pub enum AuthKind {
     Bearer,
     ApiKey,
     Basic,
+    OAuth2ClientCredentials,
 }
 
 impl AuthKind {
-    pub const ALL: [Self; 4] = [Self::None, Self::Bearer, Self::ApiKey, Self::Basic];
+    pub const ALL: [Self; 5] = [
+        Self::None,
+        Self::Bearer,
+        Self::ApiKey,
+        Self::Basic,
+        Self::OAuth2ClientCredentials,
+    ];
 }
 
 impl std::fmt::Display for AuthKind {
@@ -39,29 +46,140 @@ impl std::fmt::Display for AuthKind {
             Self::Bearer => f.write_str("Bearer token"),
             Self::ApiKey => f.write_str("API key"),
             Self::Basic => f.write_str("Basic auth"),
+            Self::OAuth2ClientCredentials => f.write_str("OAuth2 client credentials"),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthState {
-    pub kind: AuthKind,
-    pub bearer_token: String,
-    pub api_key_name: String,
-    pub api_key_value: String,
-    pub basic_username: String,
-    pub basic_password: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientSecretMethod {
+    BasicAuth,
+    RequestBody,
 }
 
-impl Default for AuthState {
+impl ClientSecretMethod {
+    pub const ALL: [Self; 2] = [Self::BasicAuth, Self::RequestBody];
+}
+
+impl std::fmt::Display for ClientSecretMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BasicAuth => f.write_str("client_secret_basic"),
+            Self::RequestBody => f.write_str("client_secret_post"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BearerAuthState {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiKeyAuthState {
+    pub header_name: String,
+    pub header_value: String,
+}
+
+impl Default for ApiKeyAuthState {
     fn default() -> Self {
         Self {
-            kind: AuthKind::None,
-            bearer_token: String::new(),
-            api_key_name: "Authorization".to_string(),
-            api_key_value: String::new(),
-            basic_username: String::new(),
-            basic_password: String::new(),
+            header_name: "Authorization".to_string(),
+            header_value: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BasicAuthState {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuth2ClientCredentialsAuthState {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub scope: String,
+    pub client_secret_method: ClientSecretMethod,
+}
+
+impl Default for OAuth2ClientCredentialsAuthState {
+    fn default() -> Self {
+        Self {
+            token_url: String::new(),
+            client_id: String::new(),
+            client_secret: String::new(),
+            scope: String::new(),
+            client_secret_method: ClientSecretMethod::BasicAuth,
+        }
+    }
+}
+
+impl OAuth2ClientCredentialsAuthState {
+    pub fn with_token_url(mut self, token_url: String) -> Self {
+        self.token_url = token_url;
+        self
+    }
+
+    pub fn with_client_id(mut self, client_id: String) -> Self {
+        self.client_id = client_id;
+        self
+    }
+
+    pub fn with_client_secret(mut self, client_secret: String) -> Self {
+        self.client_secret = client_secret;
+        self
+    }
+
+    pub fn with_scope(mut self, scope: String) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    pub const fn with_client_secret_method(
+        mut self,
+        client_secret_method: ClientSecretMethod,
+    ) -> Self {
+        self.client_secret_method = client_secret_method;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AuthState {
+    #[default]
+    None,
+    Bearer(BearerAuthState),
+    ApiKey(ApiKeyAuthState),
+    Basic(BasicAuthState),
+    OAuth2ClientCredentials(OAuth2ClientCredentialsAuthState),
+}
+
+impl AuthState {
+    pub const fn kind(&self) -> AuthKind {
+        match self {
+            Self::None => AuthKind::None,
+            Self::Bearer(_) => AuthKind::Bearer,
+            Self::ApiKey(_) => AuthKind::ApiKey,
+            Self::Basic(_) => AuthKind::Basic,
+            Self::OAuth2ClientCredentials(_) => AuthKind::OAuth2ClientCredentials,
+        }
+    }
+
+    pub fn with_kind(&self, kind: AuthKind) -> Self {
+        if self.kind() == kind {
+            return self.clone();
+        }
+        match kind {
+            AuthKind::None => Self::None,
+            AuthKind::Bearer => Self::Bearer(BearerAuthState::default()),
+            AuthKind::ApiKey => Self::ApiKey(ApiKeyAuthState::default()),
+            AuthKind::Basic => Self::Basic(BasicAuthState::default()),
+            AuthKind::OAuth2ClientCredentials => {
+                Self::OAuth2ClientCredentials(OAuth2ClientCredentialsAuthState::default())
+            }
         }
     }
 }
@@ -77,29 +195,59 @@ pub fn build_graphql_body(query: &str, variables: &str) -> String {
 }
 
 pub fn apply_auth_headers(existing: &str, auth: &AuthState) -> String {
-    match auth.kind {
-        AuthKind::None => existing.to_string(),
-        AuthKind::Bearer => {
+    match auth {
+        AuthState::None | AuthState::OAuth2ClientCredentials(_) => existing.to_string(),
+        AuthState::Bearer(bearer) => {
             let mut out = existing.to_string();
             out.push_str("\nAuthorization: Bearer ");
-            out.push_str(auth.bearer_token.trim());
+            out.push_str(bearer.token.trim());
             out
         }
-        AuthKind::ApiKey => {
+        AuthState::ApiKey(api_key) => {
             let mut out = existing.to_string();
             out.push('\n');
-            out.push_str(auth.api_key_name.trim());
+            out.push_str(api_key.header_name.trim());
             out.push_str(": ");
-            out.push_str(auth.api_key_value.trim());
+            out.push_str(api_key.header_value.trim());
             out
         }
-        AuthKind::Basic => {
-            let token = general_purpose::STANDARD
-                .encode(format!("{}:{}", auth.basic_username, auth.basic_password));
+        AuthState::Basic(basic) => {
+            let token =
+                general_purpose::STANDARD.encode(format!("{}:{}", basic.username, basic.password));
             let mut out = existing.to_string();
             out.push_str("\nAuthorization: Basic ");
             out.push_str(&token);
             out
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AuthKind, AuthState, BasicAuthState, OAuth2ClientCredentialsAuthState, apply_auth_headers,
+    };
+
+    #[test]
+    fn auth_state_kind_switches_variant() {
+        let auth = AuthState::None.with_kind(AuthKind::OAuth2ClientCredentials);
+        assert!(matches!(auth, AuthState::OAuth2ClientCredentials(_)));
+    }
+
+    #[test]
+    fn oauth2_does_not_apply_static_headers() {
+        let auth = AuthState::OAuth2ClientCredentials(OAuth2ClientCredentialsAuthState::default());
+        let headers = apply_auth_headers("Accept: application/json", &auth);
+        assert_eq!(headers, "Accept: application/json");
+    }
+
+    #[test]
+    fn basic_auth_header_is_base64_encoded() {
+        let auth = AuthState::Basic(BasicAuthState {
+            username: "aladdin".to_string(),
+            password: "opensesame".to_string(),
+        });
+        let headers = apply_auth_headers("", &auth);
+        assert_eq!(headers, "\nAuthorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l");
     }
 }

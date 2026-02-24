@@ -12,8 +12,8 @@ use crate::pathing::{GlobalEnvRoot, ProjectRoot, SaveFilePath};
 use crate::state::AppState;
 
 use super::domain::{
-    AddRequestPlan, AddRequestPlanError, ProjectConfiguration, SavePlan, SavePlanError,
-    SaveTarget, WorkspaceState,
+    AddRequestPlan, AddRequestPlanError, ProjectConfiguration, SavePlan, SavePlanError, SaveTarget,
+    WorkspaceState,
 };
 use super::options::{AuthState, RequestMode};
 use super::status::{default_environment, status_with_missing};
@@ -45,7 +45,10 @@ enum StartupStatus {
 }
 
 impl StartupStatus {
-    const fn from_context(startup_warnings: &[String], configuration: &ProjectConfiguration) -> Self {
+    const fn from_context(
+        startup_warnings: &[String],
+        configuration: &ProjectConfiguration,
+    ) -> Self {
         match (startup_warnings.is_empty(), configuration.should_scan()) {
             (true, true) => Self::Ready,
             (true, false) => Self::NeedsProject,
@@ -61,7 +64,9 @@ impl StartupStatus {
     fn status_line(self) -> String {
         match self {
             Self::Ready => "Ready".to_string(),
-            Self::NeedsProject => "No projects configured. Add a project folder to start.".to_string(),
+            Self::NeedsProject => {
+                "No projects configured. Add a project folder to start.".to_string()
+            }
             Self::WarningReady { ignored } => {
                 format!("Ignored {ignored} invalid saved folder(s).")
             }
@@ -92,6 +97,7 @@ pub struct Zagel {
     pub(super) auth: AuthState,
     pub(super) graphql_query: iced::widget::text_editor::Content,
     pub(super) graphql_variables: iced::widget::text_editor::Content,
+    pub(super) oauth2_token_cache: Option<crate::net::OAuth2TokenCacheEntry>,
     pub(super) header_rows: Vec<HeaderRow>,
     pub(super) response_display: crate::app::view::ResponseDisplay,
     pub(super) response_tab: crate::app::view::ResponseTab,
@@ -194,6 +200,7 @@ impl Zagel {
             auth: AuthState::default(),
             graphql_query: iced::widget::text_editor::Content::with_text(""),
             graphql_variables: iced::widget::text_editor::Content::with_text("{}"),
+            oauth2_token_cache: None,
             header_rows: Vec::new(),
             response_display: crate::app::view::ResponseDisplay::Pretty,
             response_tab: crate::app::view::ResponseTab::Body,
@@ -305,7 +312,7 @@ impl Zagel {
         self.configuration.project_roots()
     }
 
-    pub(super) fn global_env_roots(&self) -> &[GlobalEnvRoot] {
+    pub(super) const fn global_env_roots(&self) -> &[GlobalEnvRoot] {
         self.configuration.global_env_roots()
     }
 
@@ -368,7 +375,10 @@ impl Zagel {
     pub(super) fn build_save_plan(&self) -> Result<SavePlan, SavePlanError> {
         let draft = self.draft.clone();
         if let Some(id) = self.workspace.selection_cloned() {
-            let RequestId::HttpFile { path: selected_path, .. } = &id;
+            let RequestId::HttpFile {
+                path: selected_path,
+                ..
+            } = &id;
             let Some(root) = self.project_root_for_path(selected_path) else {
                 return Err(SavePlanError::SelectedRequestOutsideConfiguredProjects(
                     selected_path.clone(),
@@ -404,7 +414,9 @@ impl Zagel {
             return Err(AddRequestPlanError::SelectedFileNotLoaded(path));
         }
         let Some(project_root) = self.project_root_for_path(&path) else {
-            return Err(AddRequestPlanError::SelectedFileOutsideConfiguredProjects(path));
+            return Err(AddRequestPlanError::SelectedFileOutsideConfiguredProjects(
+                path,
+            ));
         };
         Ok(AddRequestPlan {
             file_path: path,

@@ -53,7 +53,7 @@ impl ProjectConfiguration {
         }
     }
 
-    pub fn global_env_roots(&self) -> &[GlobalEnvRoot] {
+    pub const fn global_env_roots(&self) -> &[GlobalEnvRoot] {
         match self {
             Self::Unconfigured { global_env_roots }
             | Self::Configured {
@@ -224,9 +224,7 @@ impl GlobalEnvChangeOutcome {
     pub const fn status_message(self) -> &'static str {
         match self {
             Self::AddedRescan => "Global env folder added. Scanning...",
-            Self::AddedIdle => {
-                "Global env folder added. Add a project folder to scan requests."
-            }
+            Self::AddedIdle => "Global env folder added. Add a project folder to scan requests.",
             Self::RemovedRescan => "Global env folder removed. Rescanning...",
             Self::RemovedIdle => {
                 "Global env folder removed. Add a project folder to scan requests."
@@ -251,9 +249,7 @@ impl Display for RootOpError {
             Self::GlobalEnvAlreadyExists => {
                 f.write_str("Global environment folder already configured")
             }
-            Self::GlobalEnvMissing => {
-                f.write_str("Global environment folder is not configured")
-            }
+            Self::GlobalEnvMissing => f.write_str("Global environment folder is not configured"),
         }
     }
 }
@@ -320,7 +316,10 @@ impl ConfiguredWorkspaceState<'_> {
 }
 
 impl WorkspaceState {
-    pub fn from_config(configuration: &ProjectConfiguration, saved_http_order: Vec<PathBuf>) -> Self {
+    pub fn from_config(
+        configuration: &ProjectConfiguration,
+        saved_http_order: Vec<PathBuf>,
+    ) -> Self {
         if configuration.should_scan() {
             Self::Configured(ConfiguredWorkspace {
                 http_file_order: saved_http_order,
@@ -395,7 +394,8 @@ impl WorkspaceState {
     }
 
     pub fn selection(&self) -> Option<&RequestId> {
-        self.configured().and_then(|workspace| workspace.selection.as_ref())
+        self.configured()
+            .and_then(|workspace| workspace.selection.as_ref())
     }
 
     pub fn selection_cloned(&self) -> Option<RequestId> {
@@ -537,7 +537,8 @@ mod tests {
     fn remove_last_project_transitions_to_unconfigured() {
         let project_dir = tempdir().expect("project dir");
         let env_dir = tempdir().expect("env dir");
-        let project = ProjectRoot::from_stored(project_dir.path().to_path_buf()).expect("project root");
+        let project =
+            ProjectRoot::from_stored(project_dir.path().to_path_buf()).expect("project root");
         let global_env =
             GlobalEnvRoot::from_stored(env_dir.path().to_path_buf()).expect("global env root");
 

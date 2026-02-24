@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::fs;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use std::marker::PhantomData;
 
 use iced::widget::pane_grid;
 use iced::{Task, clipboard};
@@ -12,10 +12,8 @@ use crate::net::send_request;
 use crate::parser::{persist_request, write_http_file};
 use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 
-use super::domain::{
-    AddRequestPlan, GlobalEnvChangeOutcome, ProjectChangeOutcome, SavePlan,
-};
-use super::options::{RequestMode, apply_auth_headers, build_graphql_body};
+use super::domain::{AddRequestPlan, GlobalEnvChangeOutcome, ProjectChangeOutcome, SavePlan};
+use super::options::{RequestMode, build_graphql_body};
 use super::status::status_with_missing;
 use super::{EditState, EditTarget, HeaderRow, Message, Zagel};
 
@@ -32,10 +30,12 @@ struct SaveFlow<State> {
 
 impl SaveFlow<Unplanned> {
     fn from_app(app: &Zagel) -> Result<Self, String> {
-        app.build_save_plan().map(|plan| Self {
-            plan,
-            marker: PhantomData,
-        }).map_err(|err| err.to_string())
+        app.build_save_plan()
+            .map(|plan| Self {
+                plan,
+                marker: PhantomData,
+            })
+            .map_err(|err| err.to_string())
     }
 
     fn into_planned(self) -> SaveFlow<Planned> {
@@ -67,10 +67,12 @@ struct AddRequestFlow<State> {
 
 impl AddRequestFlow<Unplanned> {
     fn from_app(app: &Zagel) -> Result<Self, String> {
-        app.build_add_request_plan().map(|plan| Self {
-            plan,
-            marker: PhantomData,
-        }).map_err(|err| err.to_string())
+        app.build_add_request_plan()
+            .map(|plan| Self {
+                plan,
+                marker: PhantomData,
+            })
+            .map_err(|err| err.to_string())
     }
 
     fn into_planned(self) -> AddRequestFlow<Planned> {
@@ -102,10 +104,7 @@ const fn edit_selection_mut(edit_state: &mut EditState) -> Option<&mut HashSet<E
     }
 }
 
-fn remap_edit_selection(
-    edit_state: &mut EditState,
-    mut map: impl FnMut(EditTarget) -> EditTarget,
-) {
+fn remap_edit_selection(edit_state: &mut EditState, mut map: impl FnMut(EditTarget) -> EditTarget) {
     let Some(selection) = edit_selection_mut(edit_state) else {
         return;
     };
@@ -301,7 +300,8 @@ impl Zagel {
                     remove_file_paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
                     remove_file_paths.dedup();
 
-                    let remove_files_set: HashSet<PathBuf> = remove_file_paths.iter().cloned().collect();
+                    let remove_files_set: HashSet<PathBuf> =
+                        remove_file_paths.iter().cloned().collect();
 
                     let mut file_request_removals = std::collections::HashMap::new();
                     for id in request_ids {
@@ -344,7 +344,11 @@ impl Zagel {
                             Ok(()) => {}
                             Err(_err) if !path.exists() => {}
                             Err(err) => {
-                                errors.push(format!("Failed to delete {}: {}", path.display(), err));
+                                errors.push(format!(
+                                    "Failed to delete {}: {}",
+                                    path.display(),
+                                    err
+                                ));
                             }
                         }
                         workspace.http_files_mut().remove(path);
@@ -415,8 +419,11 @@ impl Zagel {
                     file.requests.swap(*index, updated_index);
                     if let Err(err) = write_http_file(&file.path, &file.requests) {
                         file.requests.swap(*index, updated_index);
-                        status_error =
-                            Some(format!("Failed to reorder {}: {}", file.path.display(), err));
+                        status_error = Some(format!(
+                            "Failed to reorder {}: {}",
+                            file.path.display(),
+                            err
+                        ));
                     } else {
                         new_index = Some(updated_index);
                     }
@@ -454,8 +461,11 @@ impl Zagel {
                     file.requests.swap(*index, updated_index);
                     if let Err(err) = write_http_file(&file.path, &file.requests) {
                         file.requests.swap(*index, updated_index);
-                        status_error =
-                            Some(format!("Failed to reorder {}: {}", file.path.display(), err));
+                        status_error = Some(format!(
+                            "Failed to reorder {}: {}",
+                            file.path.display(),
+                            err
+                        ));
                     } else {
                         new_index = Some(updated_index);
                     }
@@ -526,6 +536,7 @@ impl Zagel {
             }
             Message::AuthChanged(new_auth) => {
                 self.auth = new_auth;
+                self.oauth2_token_cache = None;
                 Task::none()
             }
             Message::HeaderNameChanged(idx, value) => {
@@ -643,24 +654,34 @@ impl Zagel {
                         draft.headers.push_str("\nContent-Type: application/json");
                     }
                 }
-                draft.headers = apply_auth_headers(&draft.headers, &self.auth);
                 let extra_refs: Vec<&str> = extra_inputs.iter().map(String::as_str).collect();
-                self.status_line = status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
+                self.status_line =
+                    status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
                 Task::perform(
-                    send_request(self.client.clone(), draft, env),
+                    send_request(
+                        self.client.clone(),
+                        draft,
+                        env,
+                        self.auth.clone(),
+                        self.oauth2_token_cache.clone(),
+                    ),
                     Message::ResponseReady,
                 )
             }
             Message::ResponseReady(result) => {
                 match result {
-                    Ok(resp) => {
+                    Ok(outcome) => {
                         self.update_status_with_missing("Received response");
-                        self.response = Some(crate::app::view::ResponseData::from_preview(resp));
+                        self.oauth2_token_cache = outcome.oauth2_cache;
+                        self.response = Some(crate::app::view::ResponseData::from_preview(
+                            outcome.response,
+                        ));
                     }
                     Err(err) => {
                         self.update_status_with_missing("Request failed");
-                        self.response =
-                            Some(crate::app::view::ResponseData::from_preview(ResponsePreview::error(err)));
+                        self.response = Some(crate::app::view::ResponseData::from_preview(
+                            ResponsePreview::error(err),
+                        ));
                     }
                 }
                 self.update_response_viewer();
@@ -768,33 +789,35 @@ impl Zagel {
                 self.global_env_path_input = path;
                 Task::none()
             }
-            Message::AddGlobalEnvRoot => match GlobalEnvRoot::parse_user_input(&self.global_env_path_input) {
-                Ok(root) => match self.configuration.add_global_env(root) {
-                    Ok(outcome) => {
-                        self.global_env_path_input.clear();
-                        self.workspace.sync_with_configuration(&self.configuration);
-                        self.persist_state();
-                        self.update_status_with_missing(outcome.status_message());
-                        match outcome {
-                            GlobalEnvChangeOutcome::AddedRescan => {
-                                self.last_scan = Some(Instant::now());
-                                self.rescan_files()
+            Message::AddGlobalEnvRoot => {
+                match GlobalEnvRoot::parse_user_input(&self.global_env_path_input) {
+                    Ok(root) => match self.configuration.add_global_env(root) {
+                        Ok(outcome) => {
+                            self.global_env_path_input.clear();
+                            self.workspace.sync_with_configuration(&self.configuration);
+                            self.persist_state();
+                            self.update_status_with_missing(outcome.status_message());
+                            match outcome {
+                                GlobalEnvChangeOutcome::AddedRescan => {
+                                    self.last_scan = Some(Instant::now());
+                                    self.rescan_files()
+                                }
+                                GlobalEnvChangeOutcome::AddedIdle
+                                | GlobalEnvChangeOutcome::RemovedRescan
+                                | GlobalEnvChangeOutcome::RemovedIdle => Task::none(),
                             }
-                            GlobalEnvChangeOutcome::AddedIdle
-                            | GlobalEnvChangeOutcome::RemovedRescan
-                            | GlobalEnvChangeOutcome::RemovedIdle => Task::none(),
                         }
-                    }
+                        Err(err) => {
+                            self.update_status_with_missing(&err.to_string());
+                            Task::none()
+                        }
+                    },
                     Err(err) => {
                         self.update_status_with_missing(&err.to_string());
                         Task::none()
                     }
-                },
-                Err(err) => {
-                    self.update_status_with_missing(&err.to_string());
-                    Task::none()
                 }
-            },
+            }
             Message::RemoveGlobalEnvRoot(root) => {
                 let Ok(outcome) = self.configuration.remove_global_env(&root) else {
                     return Task::none();
