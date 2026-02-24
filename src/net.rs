@@ -14,13 +14,13 @@ use crate::model::{Environment, RequestDraft, ResponsePreview, apply_environment
 const OAUTH2_TOKEN_EXPIRY_SKEW: Duration = Duration::from_secs(30);
 const OAUTH2_TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OAuth2TokenCacheEntry {
     key: OAuth2TokenCacheKey,
     token: OAuth2AccessToken,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct OAuth2TokenCacheKey {
     token_url: String,
     client_id: String,
@@ -30,10 +30,44 @@ struct OAuth2TokenCacheKey {
     environment_name: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct OAuth2AccessToken {
     value: String,
     expires_at: Option<Instant>,
+}
+
+impl std::fmt::Debug for OAuth2TokenCacheEntry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OAuth2TokenCacheEntry")
+            .field("key", &self.key)
+            .field("token", &self.token)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for OAuth2TokenCacheKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OAuth2TokenCacheKey")
+            .field("token_url", &self.token_url)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("scope", &self.scope)
+            .field("client_secret_method", &self.client_secret_method)
+            .field("environment_name", &self.environment_name)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for OAuth2AccessToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OAuth2AccessToken")
+            .field("value", &"<redacted>")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl OAuth2AccessToken {
@@ -287,9 +321,14 @@ async fn send_request_with_resolved_environment(
         url,
     );
 
+    let has_extra_authorization_header = extra_authorization_header.is_some();
     for line in headers_text.lines() {
         if let Some((name, value)) = line.split_once(':') {
-            request = request.header(name.trim(), value.trim());
+            let name = name.trim();
+            if has_extra_authorization_header && name.eq_ignore_ascii_case("authorization") {
+                continue;
+            }
+            request = request.header(name, value.trim());
         }
     }
     if let Some(value) = extra_authorization_header {
