@@ -8,6 +8,7 @@ The UI is still rough around the edges but it's functioning with good keyboard s
 ## Features
 
 - GUI request composer (method, URL, headers, body)
+- Auth helpers: Bearer, API key, Basic, OAuth2 client credentials
 - Loads requests from `.http` files (blocks separated by `###`)
 - Loads environments from `.env` files (simple `KEY=VALUE` format)
 - Variable substitution in URL/headers/body via `{{VAR_NAME}}`

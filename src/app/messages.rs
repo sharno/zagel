@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use iced::widget::pane_grid;
 use iced::widget::text_editor;
 
-use crate::model::{Environment, HttpFile, Method, RequestId, ResponsePreview};
+use crate::model::{Environment, HttpFile, Method, RequestId};
 use crate::pathing::{GlobalEnvRoot, ProjectRoot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,7 +25,7 @@ pub enum Message {
     TitleChanged(String),
     BodyEdited(text_editor::Action),
     Send,
-    ResponseReady(Result<ResponsePreview, String>),
+    ResponseReady(Result<crate::net::SendOutcome, String>),
     EnvironmentChanged(String),
     Save,
     Saved(Result<(PathBuf, usize), String>),
