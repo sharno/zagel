@@ -12,6 +12,7 @@ use crate::app::{
 use crate::model::{Environment, RequestDraft, ResponsePreview, apply_environment};
 
 const OAUTH2_TOKEN_EXPIRY_SKEW: Duration = Duration::from_secs(30);
+const OAUTH2_TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct OAuth2TokenCacheEntry {
@@ -140,23 +141,32 @@ pub async fn send_request(
     auth: AuthState,
     oauth2_cache: Option<OAuth2TokenCacheEntry>,
 ) -> Result<SendOutcome, String> {
-    let (env_name, env_vars) = env.as_ref().map_or((None, BTreeMap::new()), |environment| {
-        (Some(environment.name.clone()), environment.vars.clone())
+    let (env_name, env_vars) = env.map_or((None, BTreeMap::new()), |environment| {
+        (Some(environment.name), environment.vars)
     });
 
-    let updated_cache = if let AuthState::OAuth2ClientCredentials(oauth) = auth {
-        let (token, refreshed_cache) =
-            resolve_oauth2_token(&client, &oauth, env_name.clone(), &env_vars, oauth2_cache)
-                .await?;
-        draft.headers.push_str("\nAuthorization: Bearer ");
-        draft.headers.push_str(token.trim());
-        Some(refreshed_cache)
-    } else {
-        draft.headers = apply_auth_headers(&draft.headers, &auth);
-        None
-    };
+    let (updated_cache, extra_authorization_header) =
+        if let AuthState::OAuth2ClientCredentials(oauth) = auth {
+            let (token, refreshed_cache) =
+                resolve_oauth2_token(&client, &oauth, env_name.clone(), &env_vars, oauth2_cache)
+                    .await?;
+            (
+                Some(refreshed_cache),
+                Some(format!("Bearer {}", token.trim())),
+            )
+        } else {
+            draft.headers = apply_auth_headers(&draft.headers, &auth);
+            (None, None)
+        };
 
-    let response = send_request_with_resolved_environment(client, draft, env).await?;
+    let response = send_request_with_resolved_environment(
+        client,
+        draft,
+        env_name,
+        env_vars,
+        extra_authorization_header,
+    )
+    .await?;
     Ok(SendOutcome {
         response,
         oauth2_cache: updated_cache,
@@ -203,7 +213,8 @@ async fn fetch_oauth2_client_credentials_token(
 ) -> Result<OAuth2AccessToken, String> {
     let mut request = client
         .post(&credentials.token_url)
-        .form(&credentials.build_token_form());
+        .form(&credentials.build_token_form())
+        .timeout(OAUTH2_TOKEN_REQUEST_TIMEOUT);
     if let Some(auth_header) = credentials.maybe_basic_authorization() {
         request = request.header(reqwest::header::AUTHORIZATION, auth_header);
     }
@@ -243,11 +254,10 @@ async fn fetch_oauth2_client_credentials_token(
 async fn send_request_with_resolved_environment(
     client: Client,
     draft: RequestDraft,
-    env: Option<Environment>,
+    env_name: Option<String>,
+    env_vars: BTreeMap<String, String>,
+    extra_authorization_header: Option<String>,
 ) -> Result<ResponsePreview, String> {
-    let (env_name, env_vars) = env.map_or((None, BTreeMap::new()), |environment| {
-        (Some(environment.name), environment.vars)
-    });
     let url = apply_environment(&draft.url, &env_vars);
     let headers_text = apply_environment(&draft.headers, &env_vars);
     let body_text = apply_environment(&draft.body, &env_vars);
@@ -281,6 +291,9 @@ async fn send_request_with_resolved_environment(
         if let Some((name, value)) = line.split_once(':') {
             request = request.header(name.trim(), value.trim());
         }
+    }
+    if let Some(value) = extra_authorization_header {
+        request = request.header(reqwest::header::AUTHORIZATION, value);
     }
 
     let start = Instant::now();

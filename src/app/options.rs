@@ -117,6 +117,36 @@ impl Default for OAuth2ClientCredentialsAuthState {
     }
 }
 
+impl OAuth2ClientCredentialsAuthState {
+    pub fn with_token_url(mut self, token_url: String) -> Self {
+        self.token_url = token_url;
+        self
+    }
+
+    pub fn with_client_id(mut self, client_id: String) -> Self {
+        self.client_id = client_id;
+        self
+    }
+
+    pub fn with_client_secret(mut self, client_secret: String) -> Self {
+        self.client_secret = client_secret;
+        self
+    }
+
+    pub fn with_scope(mut self, scope: String) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    pub const fn with_client_secret_method(
+        mut self,
+        client_secret_method: ClientSecretMethod,
+    ) -> Self {
+        self.client_secret_method = client_secret_method;
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AuthState {
     #[default]

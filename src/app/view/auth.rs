@@ -68,6 +68,7 @@ fn basic_fields(basic: &BasicAuthState) -> Element<'_, Message> {
             .padding(4)
             .width(Length::Fill),
         text_input("Password", &basic.password)
+            .secure(true)
             .on_input(|password| {
                 Message::AuthChanged(AuthState::Basic(BasicAuthState {
                     username: basic.username.clone(),
@@ -89,13 +90,9 @@ fn oauth2_client_credentials_fields(
         Some(oauth.client_secret_method),
         |client_secret_method| {
             Message::AuthChanged(AuthState::OAuth2ClientCredentials(
-                OAuth2ClientCredentialsAuthState {
-                    token_url: oauth.token_url.clone(),
-                    client_id: oauth.client_id.clone(),
-                    client_secret: oauth.client_secret.clone(),
-                    scope: oauth.scope.clone(),
-                    client_secret_method,
-                },
+                oauth
+                    .clone()
+                    .with_client_secret_method(client_secret_method),
             ))
         },
     )
@@ -105,13 +102,7 @@ fn oauth2_client_credentials_fields(
         text_input("Token URL", &oauth.token_url)
             .on_input(|token_url| {
                 Message::AuthChanged(AuthState::OAuth2ClientCredentials(
-                    OAuth2ClientCredentialsAuthState {
-                        token_url,
-                        client_id: oauth.client_id.clone(),
-                        client_secret: oauth.client_secret.clone(),
-                        scope: oauth.scope.clone(),
-                        client_secret_method: oauth.client_secret_method,
-                    },
+                    oauth.clone().with_token_url(token_url),
                 ))
             })
             .padding(4)
@@ -119,27 +110,16 @@ fn oauth2_client_credentials_fields(
         text_input("Client ID", &oauth.client_id)
             .on_input(|client_id| {
                 Message::AuthChanged(AuthState::OAuth2ClientCredentials(
-                    OAuth2ClientCredentialsAuthState {
-                        token_url: oauth.token_url.clone(),
-                        client_id,
-                        client_secret: oauth.client_secret.clone(),
-                        scope: oauth.scope.clone(),
-                        client_secret_method: oauth.client_secret_method,
-                    },
+                    oauth.clone().with_client_id(client_id),
                 ))
             })
             .padding(4)
             .width(Length::Fill),
         text_input("Client secret", &oauth.client_secret)
+            .secure(true)
             .on_input(|client_secret| {
                 Message::AuthChanged(AuthState::OAuth2ClientCredentials(
-                    OAuth2ClientCredentialsAuthState {
-                        token_url: oauth.token_url.clone(),
-                        client_id: oauth.client_id.clone(),
-                        client_secret,
-                        scope: oauth.scope.clone(),
-                        client_secret_method: oauth.client_secret_method,
-                    },
+                    oauth.clone().with_client_secret(client_secret),
                 ))
             })
             .padding(4)
@@ -147,13 +127,7 @@ fn oauth2_client_credentials_fields(
         text_input("Scope (optional)", &oauth.scope)
             .on_input(|scope| {
                 Message::AuthChanged(AuthState::OAuth2ClientCredentials(
-                    OAuth2ClientCredentialsAuthState {
-                        token_url: oauth.token_url.clone(),
-                        client_id: oauth.client_id.clone(),
-                        client_secret: oauth.client_secret.clone(),
-                        scope,
-                        client_secret_method: oauth.client_secret_method,
-                    },
+                    oauth.clone().with_scope(scope),
                 ))
             })
             .padding(4)
