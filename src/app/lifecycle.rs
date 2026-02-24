@@ -312,7 +312,7 @@ impl Zagel {
         self.configuration.project_roots()
     }
 
-    pub(super) fn global_env_roots(&self) -> &[GlobalEnvRoot] {
+    pub(super) const fn global_env_roots(&self) -> &[GlobalEnvRoot] {
         self.configuration.global_env_roots()
     }
 
