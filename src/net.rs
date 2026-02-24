@@ -229,11 +229,10 @@ async fn resolve_oauth2_token(
     let parsed = ClientCredentials::<Unresolved>::parse(auth, env_vars).resolve()?;
     let key = parsed.cache_key(env_name);
 
-    if let Some(existing) = cache
-        && existing.key == key
-        && existing.token.is_still_valid(Instant::now())
-    {
-        return Ok((existing.token.value.clone(), existing));
+    if let Some(existing) = cache {
+        if existing.key == key && existing.token.is_still_valid(Instant::now()) {
+            return Ok((existing.token.value.clone(), existing));
+        }
     }
 
     let token = fetch_oauth2_client_credentials_token(client, &parsed).await?;
