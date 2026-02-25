@@ -520,6 +520,7 @@ pub fn run(launch: LaunchOptions) -> iced::Result {
         view::view,
     )
     .title("Zagel - REST workbench")
+    .font(iced_fonts::BOOTSTRAP_FONT_BYTES)
     .subscription(Zagel::subscription)
     .theme(Zagel::theme)
     .run()

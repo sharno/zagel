@@ -39,6 +39,7 @@ scraper = "0.20"
 ego-tree = "0.6"
 vec1 = "1.12.1"
 image = { version = "0.25.9", default-features = false, features = ["png"] }
+iced_fonts = { version = "0.3", features = ["bootstrap"] }
 
 [dev-dependencies]
 tempfile = "3.12.0"

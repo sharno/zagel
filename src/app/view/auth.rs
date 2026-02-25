@@ -6,6 +6,7 @@ use crate::app::options::{
     ApiKeyAuthState, AuthKind, AuthState, BasicAuthState, BearerAuthState, ClientSecretMethod,
     OAuth2ClientCredentialsAuthState,
 };
+use crate::theme::{spacing, typo};
 
 pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
     let kind_pick = pick_list(AuthKind::ALL.to_vec(), Some(auth.kind()), |kind| {
@@ -13,20 +14,20 @@ pub fn auth_editor(auth: &AuthState) -> Element<'_, Message> {
     });
 
     let fields: Element<'_, Message> = match auth {
-        AuthState::None => text("No authentication").into(),
+        AuthState::None => text("No authentication").size(typo::CAPTION).into(),
         AuthState::Bearer(bearer) => bearer_fields(bearer),
         AuthState::ApiKey(api_key) => api_key_fields(api_key),
         AuthState::Basic(basic) => basic_fields(basic),
         AuthState::OAuth2ClientCredentials(oauth) => oauth2_client_credentials_fields(oauth),
     };
 
-    column![kind_pick, fields].spacing(4).into()
+    column![kind_pick, fields].spacing(spacing::SM).into()
 }
 
 fn bearer_fields(bearer: &BearerAuthState) -> Element<'_, Message> {
     text_input("Bearer token", &bearer.token)
         .on_input(|token| Message::AuthChanged(AuthState::Bearer(BearerAuthState { token })))
-        .padding(4)
+        .padding(spacing::XS)
         .width(Length::Fill)
         .into()
 }
@@ -40,7 +41,7 @@ fn api_key_fields(api_key: &ApiKeyAuthState) -> Element<'_, Message> {
                     header_value: api_key.header_value.clone(),
                 }))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         text_input("Header value", &api_key.header_value)
             .on_input(|header_value| {
@@ -49,10 +50,10 @@ fn api_key_fields(api_key: &ApiKeyAuthState) -> Element<'_, Message> {
                     header_value,
                 }))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
     ]
-    .spacing(4)
+    .spacing(spacing::XS)
     .into()
 }
 
@@ -65,7 +66,7 @@ fn basic_fields(basic: &BasicAuthState) -> Element<'_, Message> {
                     password: basic.password.clone(),
                 }))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         text_input("Password", &basic.password)
             .secure(true)
@@ -75,10 +76,10 @@ fn basic_fields(basic: &BasicAuthState) -> Element<'_, Message> {
                     password,
                 }))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
     ]
-    .spacing(4)
+    .spacing(spacing::XS)
     .into()
 }
 
@@ -105,7 +106,7 @@ fn oauth2_client_credentials_fields(
                     oauth.clone().with_token_url(token_url),
                 ))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         text_input("Client ID", &oauth.client_id)
             .on_input(|client_id| {
@@ -113,7 +114,7 @@ fn oauth2_client_credentials_fields(
                     oauth.clone().with_client_id(client_id),
                 ))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         text_input("Client secret", &oauth.client_secret)
             .secure(true)
@@ -122,7 +123,7 @@ fn oauth2_client_credentials_fields(
                     oauth.clone().with_client_secret(client_secret),
                 ))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         text_input("Scope (optional)", &oauth.scope)
             .on_input(|scope| {
@@ -130,10 +131,10 @@ fn oauth2_client_credentials_fields(
                     oauth.clone().with_scope(scope),
                 ))
             })
-            .padding(4)
+            .padding(spacing::XS)
             .width(Length::Fill),
         method_pick,
     ]
-    .spacing(4)
+    .spacing(spacing::XS)
     .into()
 }

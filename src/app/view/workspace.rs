@@ -1,16 +1,18 @@
 use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{
     button, column, container, pick_list, row, scrollable, stack, text, text_editor, text_input,
+    tooltip,
 };
-use iced::{Alignment, Element, Length, Theme, alignment};
+use iced::{alignment, Alignment, Element, Length, Theme};
 
-use super::super::{Message, Zagel, headers};
+use super::super::{headers, Message, Zagel};
 use super::auth::auth_editor;
 use super::response::{response_panel, response_tab_toggle, response_view_toggle};
 use super::section;
 use crate::app::options::RequestMode;
+use crate::icons;
 use crate::model::{Method, RequestId};
-use crate::theme;
+use crate::theme::{self, spacing, typo};
 
 #[derive(Debug, Clone, Copy)]
 pub enum WorkspacePane {
@@ -27,8 +29,8 @@ pub enum BuilderPane {
 const ENV_PICK_MAX_WIDTH: f32 = 180.0;
 const MODE_PICK_MAX_WIDTH: f32 = 150.0;
 const METHOD_PICK_MAX_WIDTH: f32 = 120.0;
-const ACTION_WIDTH: f32 = 84.0;
-const LABEL_WIDTH: f32 = 80.0;
+const ACTION_WIDTH: f32 = 100.0;
+const LABEL_WIDTH: f32 = 72.0;
 
 pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     let workspace_grid = PaneGrid::new(&app.workspace_panes, move |_, pane, _| match pane {
@@ -37,20 +39,14 @@ pub fn workspace(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(8.0)
+    .spacing(spacing::XXS)
     .on_resize(6, Message::WorkspacePaneResized);
 
-    let header = text("Request Builder").size(20);
-
-    container(
-        column![header, workspace_grid]
-            .spacing(8)
-            .height(Length::Fill),
-    )
-    .padding(8)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    container(workspace_grid)
+        .padding(spacing::XS)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn builder(app: &Zagel) -> Element<'_, Message> {
@@ -60,12 +56,13 @@ fn builder(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(4.0)
+    .spacing(spacing::XXS)
     .on_resize(6, Message::BuilderPaneResized);
 
     builder_grid.into()
 }
 
+#[allow(clippy::too_many_lines)]
 fn builder_form(app: &Zagel) -> Element<'_, Message> {
     let env_pick = container(
         pick_list(
@@ -94,31 +91,31 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 
     let url_input = text_input("https://api.example.com", &app.draft.url)
         .on_input(Message::UrlChanged)
-        .padding(6)
+        .padding(spacing::XS)
         .width(Length::FillPortion(6));
 
     let title_input = text_input("Title", &app.draft.title)
         .on_input(Message::TitleChanged)
-        .padding(4)
+        .padding(spacing::XS)
         .width(Length::FillPortion(5));
 
     let save_path_row: Element<'_, Message> = match app.workspace.selection() {
         Some(RequestId::HttpFile { path, .. }) => row![
-            container(text("Saving to").size(14)).width(Length::Fixed(LABEL_WIDTH)),
-            container(text(path.display().to_string()).size(14)).width(Length::Fill)
+            container(text("Saving to").size(typo::CAPTION)).width(Length::Fixed(LABEL_WIDTH)),
+            container(text(path.display().to_string()).size(typo::CAPTION)).width(Length::Fill)
         ]
         .align_y(Alignment::Center)
-        .spacing(6)
+        .spacing(spacing::SM)
         .into(),
         _ => row![
-            container(text("Save as").size(14)).width(Length::Fixed(LABEL_WIDTH)),
+            container(text("Save as").size(typo::CAPTION)).width(Length::Fixed(LABEL_WIDTH)),
             text_input("path/to/request.http", &app.save_path)
                 .on_input(Message::SavePathChanged)
-                .padding(4)
+                .padding(spacing::XS)
                 .width(Length::Fill),
         ]
         .align_y(Alignment::Center)
-        .spacing(6)
+        .spacing(spacing::SM)
         .into(),
     };
 
@@ -138,43 +135,80 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
     let meta_section = column![
         row![
             title_input,
-            button("Save")
+            tooltip(
+                button(
+                    row![
+                        icons::save().size(typo::BODY),
+                        text("Save").size(typo::BODY)
+                    ]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center),
+                )
                 .on_press(Message::Save)
+                .padding([spacing::XS, spacing::MD])
                 .width(Length::Fixed(ACTION_WIDTH)),
+                "Save request (Ctrl+S)",
+                tooltip::Position::Top,
+            ),
         ]
         .align_y(Alignment::Center)
-        .spacing(6),
+        .spacing(spacing::SM),
         save_path_row,
         row![env_pick, mode_pick]
             .align_y(Alignment::Center)
-            .spacing(6),
+            .spacing(spacing::SM),
     ]
-    .spacing(6);
+    .spacing(spacing::SM);
 
     let request_section = row![
         method_pick,
         url_input,
-        button("Send")
+        tooltip(
+            button(
+                row![
+                    icons::send().size(typo::BODY),
+                    text("Send").size(typo::BODY)
+                ]
+                .spacing(spacing::XXS)
+                .align_y(Alignment::Center),
+            )
             .on_press(Message::Send)
-            .width(Length::Fixed(ACTION_WIDTH)),
+            .padding([spacing::XS, spacing::MD])
+            .width(Length::Fixed(ACTION_WIDTH))
+            .style(theme::accent_button_style),
+            "Send request (Ctrl+Enter)",
+            tooltip::Position::Top,
+        ),
     ]
     .align_y(Alignment::Center)
-    .spacing(6);
+    .spacing(spacing::SM);
 
     let form_content = column![
-        section("Meta", meta_section.into()),
-        section("Request", request_section.into()),
-        section("Headers", headers::editor(&app.header_rows)),
-        section("Auth", auth_view),
+        section(
+            "Meta",
+            icons::info_circle().size(typo::BODY),
+            meta_section.into(),
+        ),
+        section(
+            "Request",
+            icons::send_icon().size(typo::BODY),
+            request_section.into(),
+        ),
+        section(
+            "Headers",
+            icons::list_ul().size(typo::BODY),
+            headers::editor(&app.header_rows),
+        ),
+        section("Auth", icons::key().size(typo::BODY), auth_view,),
     ]
-    .spacing(10);
+    .spacing(spacing::SM);
 
     let form_scroll = scrollable(form_content)
         .width(Length::Fill)
         .height(Length::Fill);
 
     container(form_scroll)
-        .padding(8)
+        .padding(spacing::XS)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -196,29 +230,38 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
                 text_editor(&app.graphql_variables)
                     .on_action(Message::GraphqlVariablesEdited)
                     .height(Length::FillPortion(2));
-            column![text("Query"), query_editor, text("Variables"), vars_editor,]
-                .height(Length::Fill)
-                .spacing(6)
-                .into()
+            column![
+                text("Query").size(typo::CAPTION),
+                query_editor,
+                text("Variables").size(typo::CAPTION),
+                vars_editor,
+            ]
+            .height(Length::Fill)
+            .spacing(spacing::XS)
+            .into()
         }
         RequestMode::Rest => {
             let body_editor: iced::widget::TextEditor<'_, _, _, Theme> =
                 text_editor(&app.body_editor)
                     .on_action(Message::BodyEdited)
                     .height(Length::Fill);
-            column![text("Body"), body_editor]
+            column![text("Body").size(typo::CAPTION), body_editor]
                 .height(Length::Fill)
-                .spacing(6)
+                .spacing(spacing::XS)
                 .into()
         }
     };
 
-    let body_section = section(body_title, body_panel);
+    let body_section = section(body_title, icons::code_slash().size(typo::BODY), body_panel);
 
-    container(column![body_section].padding(8).height(Length::Fill))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    container(
+        column![body_section]
+            .padding(spacing::XS)
+            .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 fn response(app: &Zagel) -> Element<'_, Message> {
@@ -226,10 +269,25 @@ fn response(app: &Zagel) -> Element<'_, Message> {
         response_view_toggle(app.response_display),
         response_tab_toggle(app.response_tab),
     ]
-    .spacing(8);
+    .spacing(spacing::SM)
+    .align_y(Alignment::Center);
 
     if matches!(app.response_tab, super::response::ResponseTab::Body) {
-        status_row = status_row.push(button("Copy raw").on_press(Message::CopyResponseRaw));
+        status_row = status_row.push(tooltip(
+            button(
+                row![
+                    icons::clipboard().size(typo::BODY),
+                    text("Raw").size(typo::BODY)
+                ]
+                .spacing(spacing::XXS)
+                .align_y(Alignment::Center),
+            )
+            .on_press(Message::CopyResponseRaw)
+            .padding([spacing::XXS, spacing::SM])
+            .style(theme::ghost_button_style),
+            "Copy raw response body",
+            tooltip::Position::Top,
+        ));
         if app.response_display == super::response::ResponseDisplay::Pretty
             && app
                 .response
@@ -237,8 +295,21 @@ fn response(app: &Zagel) -> Element<'_, Message> {
                 .and_then(|response| response.body.pretty_text())
                 .is_some()
         {
-            status_row =
-                status_row.push(button("Copy pretty").on_press(Message::CopyResponsePretty));
+            status_row = status_row.push(tooltip(
+                button(
+                    row![
+                        icons::clipboard().size(typo::BODY),
+                        text("Pretty").size(typo::BODY)
+                    ]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center),
+                )
+                .on_press(Message::CopyResponsePretty)
+                .padding([spacing::XXS, spacing::SM])
+                .style(theme::ghost_button_style),
+                "Copy pretty-printed response",
+                tooltip::Position::Top,
+            ));
         }
     }
 
@@ -252,14 +323,15 @@ fn response(app: &Zagel) -> Element<'_, Message> {
 
     let response_section = section(
         "Response",
+        icons::arrow_left_right().size(typo::BODY),
         column![status_row, response_view]
-            .spacing(6)
+            .spacing(spacing::SM)
             .height(Length::Fill)
             .into(),
     );
 
     let base = container(response_section)
-        .padding(8)
+        .padding(spacing::XS)
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
@@ -270,7 +342,7 @@ fn response(app: &Zagel) -> Element<'_, Message> {
             .height(Length::Fill)
             .align_x(alignment::Horizontal::Right)
             .align_y(alignment::Vertical::Top)
-            .padding(12)
+            .padding(spacing::LG)
             .into();
 
         return stack([base, overlay]).into();
@@ -281,20 +353,32 @@ fn response(app: &Zagel) -> Element<'_, Message> {
 
 fn shortcuts_panel() -> Element<'static, Message> {
     let header = row![
-        text("Keyboard shortcuts").size(16),
-        button("Close").on_press(Message::ToggleShortcutsHelp)
+        icons::question_circle().size(typo::HEADING),
+        text("Keyboard shortcuts").size(typo::HEADING),
+        button(
+            row![
+                icons::x_circle().size(typo::BODY),
+                text("Close").size(typo::BODY)
+            ]
+            .spacing(spacing::XXS)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::ToggleShortcutsHelp)
+        .padding([spacing::XXS, spacing::SM])
+        .style(theme::ghost_button_style),
     ]
-    .spacing(8);
+    .spacing(spacing::SM)
+    .align_y(Alignment::Center);
 
     let shortcuts = column![
-        text("? - Toggle shortcuts help").size(14),
-        text("Ctrl/Cmd+S - Save request").size(14),
-        text("Ctrl/Cmd+Enter - Send request").size(14),
+        text("?  Toggle shortcuts help").size(typo::BODY),
+        text("Ctrl/Cmd+S  Save request").size(typo::BODY),
+        text("Ctrl/Cmd+Enter  Send request").size(typo::BODY),
     ]
-    .spacing(2);
+    .spacing(spacing::XXS);
 
-    container(column![header, shortcuts].spacing(6))
-        .padding(10)
+    container(column![header, shortcuts].spacing(spacing::SM))
+        .padding(spacing::LG)
         .style(theme::overlay_container_style)
         .into()
 }

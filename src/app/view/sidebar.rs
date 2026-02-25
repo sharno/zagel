@@ -1,20 +1,24 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
-use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input, tooltip};
 use iced::{Alignment, Element, Length};
 
+use crate::icons;
 use crate::pathing::{GlobalEnvRoot, ProjectRoot};
+use crate::theme::{self, spacing, typo};
 
 use super::super::{EditState, EditTarget, Message};
 use super::section;
 use crate::model::{HttpFile, RequestDraft, RequestId};
 
-const INDENT: i16 = 10;
+const INDENT: i16 = 14;
 
+/// Icon set selection is now purely cosmetic (bootstrap vs ascii fallback).
+/// The default is `Bootstrap`; set `ZAGEL_ICON_SET=ascii` to fall back.
 #[derive(Debug, Clone, Copy)]
 pub enum IconSet {
-    Unicode,
+    Bootstrap,
     Ascii,
 }
 
@@ -25,44 +29,9 @@ impl IconSet {
             .map(|value| value.to_ascii_lowercase())
         {
             Some(value) if value == "ascii" => Self::Ascii,
-            Some(value) if value == "unicode" => Self::Unicode,
-            _ => Self::Unicode,
+            _ => Self::Bootstrap,
         }
     }
-
-    pub const fn icons(self) -> Icons {
-        match self {
-            Self::Unicode => Icons {
-                collapsed: "▸",
-                expanded: "▾",
-                checked: "☑",
-                unchecked: "☐",
-                move_up: "↑",
-                move_down: "↓",
-                selected: "→",
-            },
-            Self::Ascii => Icons {
-                collapsed: ">",
-                expanded: "v",
-                checked: "[x]",
-                unchecked: "[ ]",
-                move_up: "^",
-                move_down: "v",
-                selected: ">",
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Icons {
-    collapsed: &'static str,
-    expanded: &'static str,
-    checked: &'static str,
-    unchecked: &'static str,
-    move_up: &'static str,
-    move_down: &'static str,
-    selected: &'static str,
 }
 
 #[derive(Clone, Copy)]
@@ -84,7 +53,7 @@ struct RenderContext<'a> {
     collapsed: &'a BTreeSet<String>,
     editing: bool,
     edit_selection: Option<&'a HashSet<EditTarget>>,
-    icons: Icons,
+    icon_set: IconSet,
 }
 
 #[derive(Default)]
@@ -110,70 +79,149 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         EditState::On { selection } => (true, Some(selection)),
         EditState::Off => (false, None),
     };
-    let icons = ctx.icon_set.icons();
 
     let project_input = text_input("C:/path/to/project", ctx.project_path_input)
         .on_input(Message::ProjectPathInputChanged)
-        .padding(4)
+        .padding(spacing::XS)
         .width(Length::FillPortion(4));
-    let add_project = button("Add project").on_press(Message::AddProject);
+    let add_project = tooltip(
+        button(
+            row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
+                .spacing(spacing::XXS)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::AddProject)
+        .padding([spacing::XXS, spacing::SM]),
+        "Add project folder",
+        tooltip::Position::Top,
+    );
 
-    let mut project_roots = column![row![project_input, add_project].spacing(6)].spacing(6);
+    let mut project_roots = column![row![project_input, add_project].spacing(spacing::XS)]
+        .spacing(spacing::XS);
     if ctx.project_roots.is_empty() {
-        project_roots = project_roots.push(text("No projects configured").size(13));
+        project_roots = project_roots.push(text("No projects configured").size(typo::CAPTION));
     } else {
         for root in ctx.project_roots {
             project_roots = project_roots.push(
                 row![
-                    text(root.as_path().display().to_string()).size(13),
-                    button("Remove").on_press(Message::RemoveProject(root.clone())),
+                    text(root.as_path().display().to_string()).size(typo::CAPTION),
+                    tooltip(
+                        button(remove_action_icon(ctx.icon_set))
+                            .on_press(Message::RemoveProject(root.clone()))
+                            .padding([spacing::XXXS, spacing::XXS])
+                            .style(theme::ghost_button_style),
+                        "Remove project",
+                        tooltip::Position::Top,
+                    ),
                 ]
                 .align_y(Alignment::Center)
-                .spacing(6),
+                .spacing(spacing::XS),
             );
         }
     }
 
     let global_env_input = text_input("C:/path/to/global/envs", ctx.global_env_path_input)
         .on_input(Message::GlobalEnvPathInputChanged)
-        .padding(4)
+        .padding(spacing::XS)
         .width(Length::FillPortion(4));
-    let add_global = button("Add global envs").on_press(Message::AddGlobalEnvRoot);
+    let add_global = tooltip(
+        button(
+            row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
+                .spacing(spacing::XXS)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::AddGlobalEnvRoot)
+        .padding([spacing::XXS, spacing::SM]),
+        "Add global env folder",
+        tooltip::Position::Top,
+    );
 
-    let mut global_env_roots = column![row![global_env_input, add_global].spacing(6)].spacing(6);
+    let mut global_env_roots = column![row![global_env_input, add_global].spacing(spacing::XS)]
+        .spacing(spacing::XS);
     if ctx.global_env_roots.is_empty() {
-        global_env_roots = global_env_roots.push(text("No global env folders").size(13));
+        global_env_roots = global_env_roots.push(text("No global env folders").size(typo::CAPTION));
     } else {
         for root in ctx.global_env_roots {
             global_env_roots = global_env_roots.push(
                 row![
-                    text(root.as_path().display().to_string()).size(13),
-                    button("Remove").on_press(Message::RemoveGlobalEnvRoot(root.clone())),
+                    text(root.as_path().display().to_string()).size(typo::CAPTION),
+                    tooltip(
+                        button(remove_action_icon(ctx.icon_set))
+                            .on_press(Message::RemoveGlobalEnvRoot(root.clone()))
+                            .padding([spacing::XXXS, spacing::XXS])
+                            .style(theme::ghost_button_style),
+                        "Remove env folder",
+                        tooltip::Position::Top,
+                    ),
                 ]
                 .align_y(Alignment::Center)
-                .spacing(6),
+                .spacing(spacing::XS),
             );
         }
     }
 
     let mut header = row![
-        text("Requests").size(20),
-        button("Add").on_press(Message::AddRequest)
+        text("Requests").size(typo::TITLE),
+        tooltip(
+            button(
+                row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(Message::AddRequest)
+            .padding([spacing::XXS, spacing::SM]),
+            "Add new request",
+            tooltip::Position::Top,
+        ),
     ]
     .align_y(Alignment::Center)
-    .spacing(6);
+    .spacing(spacing::XS);
+
     if editing {
         let selection_empty = edit_selection.is_none_or(HashSet::is_empty);
         let delete_button = if selection_empty {
-            button("Delete")
+            button(
+                row![delete_action_icon(ctx.icon_set), text("Delete").size(typo::BODY)]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center),
+            )
+            .padding([spacing::XXS, spacing::SM])
+            .style(theme::destructive_button_style)
         } else {
-            button("Delete").on_press(Message::DeleteSelected)
+            button(
+                row![delete_action_icon(ctx.icon_set), text("Delete").size(typo::BODY)]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(Message::DeleteSelected)
+            .padding([spacing::XXS, spacing::SM])
+            .style(theme::destructive_button_style)
         };
         header = header
             .push(delete_button)
-            .push(button("Done").on_press(Message::ToggleEditMode));
+            .push(
+                button(
+                    row![done_action_icon(ctx.icon_set), text("Done").size(typo::BODY)]
+                        .spacing(spacing::XXS)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(Message::ToggleEditMode)
+                .padding([spacing::XXS, spacing::SM]),
+            );
     } else {
-        header = header.push(button("Edit").on_press(Message::ToggleEditMode));
+        header = header.push(
+            tooltip(
+                button(
+                    row![edit_action_icon(ctx.icon_set), text("Edit").size(typo::BODY)]
+                        .spacing(spacing::XXS)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(Message::ToggleEditMode)
+                .padding([spacing::XXS, spacing::SM]),
+                "Toggle edit mode",
+                tooltip::Position::Top,
+            ),
+        );
     }
 
     let mut tree = TreeNode::default();
@@ -232,12 +280,25 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         collapsed: ctx.collapsed,
         editing,
         edit_selection,
-        icons,
+        icon_set: ctx.icon_set,
     };
-    let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(4);
-    let project_section = section("Projects", project_roots.into());
-    let global_env_section = section("Global Environments", global_env_roots.into());
-    let collections_section = section("Collections", list.into());
+    let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(spacing::XXXS);
+
+    let project_section = section(
+        "Projects",
+        icons::folder_open().size(typo::BODY),
+        project_roots.into(),
+    );
+    let global_env_section = section(
+        "Global Environments",
+        icons::globe().size(typo::BODY),
+        global_env_roots.into(),
+    );
+    let collections_section = section(
+        "Collections",
+        icons::collection().size(typo::BODY),
+        list.into(),
+    );
 
     let list = scrollable(
         column![
@@ -246,15 +307,16 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
             header,
             collections_section
         ]
-        .spacing(10),
+        .spacing(spacing::SM),
     )
     .width(Length::Fill)
     .height(Length::Fill);
 
     container(list)
-        .padding(8)
+        .padding(spacing::SM)
         .width(Length::Fill)
         .height(Length::Fill)
+        .style(theme::sidebar_container_style)
         .into()
 }
 
@@ -357,6 +419,75 @@ fn render_requests<'a>(
     column
 }
 
+/// Collapsed/expanded chevron icon element.
+fn chevron_icon(collapsed: bool, icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => {
+            if collapsed {
+                icons::chevron_right().size(typo::CAPTION).into()
+            } else {
+                icons::chevron_down().size(typo::CAPTION).into()
+            }
+        }
+        IconSet::Ascii => {
+            let label = if collapsed { ">" } else { "v" };
+            text(label).size(typo::CAPTION).into()
+        }
+    }
+}
+
+/// Checkbox icon element.
+fn checkbox_icon(checked: bool, icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => {
+            if checked {
+                icons::check_square().size(typo::BODY).into()
+            } else {
+                icons::square().size(typo::BODY).into()
+            }
+        }
+        IconSet::Ascii => {
+            let label = if checked { "[x]" } else { "[ ]" };
+            text(label).size(typo::CAPTION).into()
+        }
+    }
+}
+
+fn add_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::plus_circle().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("+").size(typo::BODY)),
+    }
+}
+
+fn remove_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::dash_circle().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("-").size(typo::BODY)),
+    }
+}
+
+fn delete_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::trash().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("x").size(typo::BODY)),
+    }
+}
+
+fn done_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::check_lg().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("v").size(typo::BODY)),
+    }
+}
+
+fn edit_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::pencil().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("~").size(typo::BODY)),
+    }
+}
+
 fn collection_row<'a>(
     child: &TreeChild,
     depth: usize,
@@ -364,14 +495,9 @@ fn collection_row<'a>(
     full_path: &str,
     is_collapsed: bool,
 ) -> iced::widget::Row<'a, Message> {
-    let toggle_label = if is_collapsed {
-        ctx.icons.collapsed
-    } else {
-        ctx.icons.expanded
-    };
-    let toggle = button(text(toggle_label))
-        .style(button::secondary)
-        .padding([2, 4])
+    let toggle = button(chevron_icon(is_collapsed, ctx.icon_set))
+        .style(theme::ghost_button_style)
+        .padding([spacing::XXXS, spacing::XXS])
         .on_press(Message::ToggleCollection(full_path.to_string()));
 
     let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
@@ -381,26 +507,31 @@ fn collection_row<'a>(
         && let (Some(edit_selection), Some(collection_path)) = (ctx.edit_selection, collection_path)
     {
         let target = EditTarget::Collection(collection_path.clone());
-        let label = if edit_selection.contains(&target) {
-            ctx.icons.checked
-        } else {
-            ctx.icons.unchecked
-        };
+        let checked = edit_selection.contains(&target);
         row_widgets = row_widgets
             .push(
-                button(text(label))
-                    .padding([2, 4])
+                button(checkbox_icon(checked, ctx.icon_set))
+                    .padding([spacing::XXXS, spacing::XXS])
+                    .style(theme::ghost_button_style)
                     .on_press(Message::ToggleEditSelection(target)),
             )
             .push(
-                button(text(ctx.icons.move_up))
-                    .padding([2, 4])
-                    .on_press(Message::MoveCollectionUp(collection_path.clone())),
+                button(match ctx.icon_set {
+                    IconSet::Bootstrap => icons::arrow_up().size(typo::CAPTION).into(),
+                    IconSet::Ascii => Element::from(text("^").size(typo::CAPTION)),
+                })
+                .padding([spacing::XXXS, spacing::XXS])
+                .style(theme::ghost_button_style)
+                .on_press(Message::MoveCollectionUp(collection_path.clone())),
             )
             .push(
-                button(text(ctx.icons.move_down))
-                    .padding([2, 4])
-                    .on_press(Message::MoveCollectionDown(collection_path)),
+                button(match ctx.icon_set {
+                    IconSet::Bootstrap => icons::arrow_down().size(typo::CAPTION).into(),
+                    IconSet::Ascii => Element::from(text("v").size(typo::CAPTION)),
+                })
+                .padding([spacing::XXXS, spacing::XXS])
+                .style(theme::ghost_button_style)
+                .on_press(Message::MoveCollectionDown(collection_path)),
             );
     }
 
@@ -414,21 +545,23 @@ fn collection_row<'a>(
             index: 0,
         };
 
+        let selected = is_selected;
         row_widgets.push(
-            button(text(child.name.clone()).size(14))
-                .style(if is_selected {
-                    button::primary
-                } else {
-                    button::secondary
+            button(text(child.name.clone()).size(typo::BODY))
+                .style(move |theme, status| {
+                    theme::sidebar_item_style(theme, status, selected)
                 })
+                .padding([spacing::XXS, spacing::SM])
                 .width(Length::Fill)
                 .on_press(Message::Select(select_id)),
         )
     } else {
-        row_widgets.push(text(child.name.clone()).size(14))
+        row_widgets.push(text(child.name.clone()).size(typo::BODY))
     };
 
-    row_widgets.spacing(4)
+    row_widgets
+        .spacing(spacing::XXXS)
+        .align_y(Alignment::Center)
 }
 
 fn request_row<'a>(
@@ -437,51 +570,71 @@ fn request_row<'a>(
     ctx: &RenderContext<'a>,
 ) -> iced::widget::Row<'a, Message> {
     let is_selected = ctx.selection.is_some_and(|s| *s == item.id);
-    let label = if is_selected {
-        format!(
-            "{} {} • {}",
-            ctx.icons.selected, item.draft.method, item.draft.title
-        )
+
+    // Build the request label with colored method badge
+    let method = item.draft.method;
+    let method_color = theme::method_color(method);
+    let method_badge = text(method.as_str())
+        .size(typo::CAPTION)
+        .color(method_color);
+
+    let selected_indicator: Element<'_, Message> = if is_selected {
+        match ctx.icon_set {
+            IconSet::Bootstrap => icons::arrow_right().size(typo::CAPTION).into(),
+            IconSet::Ascii => text(">").size(typo::CAPTION).into(),
+        }
     } else {
-        format!("{} • {}", item.draft.method, item.draft.title)
+        Space::new().width(Length::Shrink).into()
     };
+
+    let title = item.draft.title.clone();
+    let label_content = row![selected_indicator, method_badge, text(title).size(typo::BODY)]
+        .spacing(spacing::XXS)
+        .align_y(Alignment::Center);
+
     let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth + 1)))];
     if ctx.editing
         && let Some(edit_selection) = ctx.edit_selection
     {
         let target = EditTarget::Request(item.id.clone());
-        let select_label = if edit_selection.contains(&target) {
-            ctx.icons.checked
-        } else {
-            ctx.icons.unchecked
-        };
+        let checked = edit_selection.contains(&target);
         row_widgets = row_widgets
             .push(
-                button(text(select_label))
-                    .padding([2, 4])
+                button(checkbox_icon(checked, ctx.icon_set))
+                    .padding([spacing::XXXS, spacing::XXS])
+                    .style(theme::ghost_button_style)
                     .on_press(Message::ToggleEditSelection(target)),
             )
             .push(
-                button(text(ctx.icons.move_up))
-                    .padding([2, 4])
-                    .on_press(Message::MoveRequestUp(item.id.clone())),
+                button(match ctx.icon_set {
+                    IconSet::Bootstrap => icons::arrow_up().size(typo::CAPTION).into(),
+                    IconSet::Ascii => Element::from(text("^").size(typo::CAPTION)),
+                })
+                .padding([spacing::XXXS, spacing::XXS])
+                .style(theme::ghost_button_style)
+                .on_press(Message::MoveRequestUp(item.id.clone())),
             )
             .push(
-                button(text(ctx.icons.move_down))
-                    .padding([2, 4])
-                    .on_press(Message::MoveRequestDown(item.id.clone())),
+                button(match ctx.icon_set {
+                    IconSet::Bootstrap => icons::arrow_down().size(typo::CAPTION).into(),
+                    IconSet::Ascii => Element::from(text("v").size(typo::CAPTION)),
+                })
+                .padding([spacing::XXXS, spacing::XXS])
+                .style(theme::ghost_button_style)
+                .on_press(Message::MoveRequestDown(item.id.clone())),
             );
     }
+
+    let selected = is_selected;
     row_widgets = row_widgets.push(
-        button(text(label))
-            .style(if is_selected {
-                button::primary
-            } else {
-                button::secondary
-            })
+        button(label_content)
+            .style(move |theme, status| theme::sidebar_item_style(theme, status, selected))
+            .padding([spacing::XXS, spacing::SM])
             .width(Length::Fill)
             .on_press(Message::Select(item.id.clone())),
     );
 
-    row_widgets.spacing(4)
+    row_widgets
+        .spacing(spacing::XXXS)
+        .align_y(Alignment::Center)
 }

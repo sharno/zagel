@@ -3,12 +3,13 @@ use iced::widget::text::Wrapping;
 use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, text, text_editor,
 };
-use iced::{Element, Length};
+use iced::{Alignment, Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 use scraper::{Html, Node};
 
 use super::super::Message;
 use crate::model::ResponsePreview;
+use crate::theme::{self, spacing, typo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntaxKind {
@@ -169,22 +170,24 @@ impl std::fmt::Display for ResponseTab {
 
 /// Creates a toggle widget for switching between Body and Headers tabs in the response view.
 pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
-    let body = button(text("Body"))
+    let body = button(text("Body").size(typo::BODY))
         .style(if current == ResponseTab::Body {
             button::primary
         } else {
             button::secondary
         })
+        .padding([spacing::XXS, spacing::SM])
         .on_press(Message::ResponseTabChanged(ResponseTab::Body));
-    let headers = button(text("Headers"))
+    let headers = button(text("Headers").size(typo::BODY))
         .style(if current == ResponseTab::Headers {
             button::primary
         } else {
             button::secondary
         })
+        .padding([spacing::XXS, spacing::SM])
         .on_press(Message::ResponseTabChanged(ResponseTab::Headers));
 
-    row![body, headers].spacing(6).into()
+    row![body, headers].spacing(spacing::XXS).into()
 }
 
 /// Creates a pick list widget for switching between Raw and Pretty response display modes.
@@ -202,34 +205,64 @@ pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Messag
 /// Displays the HTTP response status, duration, and either the body or headers
 /// based on the selected tab. Supports both raw and pretty-printed views for
 /// JSON and HTML content.
+#[allow(clippy::too_many_lines)]
 pub fn response_panel<'a>(
-    response: Option<&ResponseData>,
+    response: Option<&'a ResponseData>,
     content: &'a text_editor::Content,
     display: ResponseDisplay,
     tab: ResponseTab,
     highlight_theme: HighlightTheme,
 ) -> Element<'a, Message> {
     response.map_or_else(
-        || text("No response yet").into(),
+        || text("No response yet").size(typo::BODY).into(),
         |response| {
             let resp = &response.preview;
             let body = &response.body;
-            let header = match (resp.status, resp.duration) {
+
+            // Status line with colored status code
+            let header: Element<'_, Message> = match (resp.status, resp.duration) {
                 (Some(status), Some(duration)) => {
-                    format!("HTTP {status} in {} ms", duration.as_millis())
+                    let color = theme::status_color(status);
+                    row![
+                        text("HTTP").size(typo::HEADING),
+                        text(status.to_string()).size(typo::HEADING).color(color),
+                        text(format!("in {} ms", duration.as_millis())).size(typo::BODY),
+                    ]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center)
+                    .into()
                 }
-                (Some(status), None) => format!("HTTP {status}"),
-                _ => "No response".to_string(),
+                (Some(status), None) => {
+                    let color = theme::status_color(status);
+                    row![
+                        text("HTTP").size(typo::HEADING),
+                        text(status.to_string()).size(typo::HEADING).color(color),
+                    ]
+                    .spacing(spacing::XXS)
+                    .align_y(Alignment::Center)
+                    .into()
+                }
+                _ => text("No response").size(typo::HEADING).into(),
             };
 
-            let mut headers_view = column![];
-            if resp.headers.is_empty() {
-                headers_view = headers_view.push(text("No headers").size(12));
+            // Headers as a key-value table
+            let headers_view: Element<'_, Message> = if resp.headers.is_empty() {
+                text("No headers").size(typo::CAPTION).into()
             } else {
+                let mut header_rows = column![].spacing(spacing::XXXS);
                 for (name, value) in &resp.headers {
-                    headers_view = headers_view.push(text(format!("{name}: {value}")).size(12));
+                    header_rows = header_rows.push(
+                        row![
+                            container(text(name).size(typo::CAPTION)).width(Length::FillPortion(2)),
+                            container(text(value).size(typo::CAPTION))
+                                .width(Length::FillPortion(5)),
+                        ]
+                        .spacing(spacing::SM)
+                        .align_y(Alignment::Start),
+                    );
                 }
-            }
+                scrollable(header_rows).height(Length::Fill).into()
+            };
 
             let pretty_kind = body.pretty_kind();
             let syntax = body.syntax();
@@ -250,18 +283,16 @@ pub fn response_panel<'a>(
                         (ResponseDisplay::Raw, _) => "raw",
                     }
                 ))
-                .size(14),
+                .size(typo::CAPTION),
                 body_editor,
             ]
-            .spacing(6)
+            .spacing(spacing::XS)
             .into();
 
-            let headers_section: Element<'_, Message> = column![
-                text("Headers").size(14),
-                scrollable(headers_view.spacing(4)).height(Length::Fill),
-            ]
-            .spacing(6)
-            .into();
+            let headers_section: Element<'_, Message> =
+                column![text("Headers").size(typo::CAPTION), headers_view,]
+                    .spacing(spacing::XS)
+                    .into();
 
             let tab_view: Element<'_, Message> = match tab {
                 ResponseTab::Body => body_section,
@@ -269,11 +300,11 @@ pub fn response_panel<'a>(
             };
 
             column![
-                text(header).size(16),
+                header,
                 rule::horizontal(1),
                 container(tab_view).height(Length::Fill),
             ]
-            .spacing(6)
+            .spacing(spacing::SM)
             .height(Length::Fill)
             .into()
         },
@@ -582,7 +613,7 @@ fn html_parse_mode(raw: &str) -> HtmlParseMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{HtmlParseMode, html_parse_mode, pretty_html};
+    use super::{html_parse_mode, pretty_html, HtmlParseMode};
 
     #[test]
     fn html_parse_mode_detects_document_markers() {
