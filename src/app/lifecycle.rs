@@ -248,6 +248,7 @@ impl Zagel {
                 Err(err) => {
                     app.update_status_with_missing(&format!("Automation disabled: {err}"));
                     eprintln!("automation: {err}");
+                    std::process::exit(2);
                 }
             }
         }

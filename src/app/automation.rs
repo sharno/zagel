@@ -137,10 +137,7 @@ impl ScenarioStep {
             }
             "send" => Ok(Self::Send),
             "wait_for_status" => {
-                let value = raw.required_string("wait_for_status")?;
-                let status = value
-                    .parse::<u16>()
-                    .map_err(|_| format!("invalid status code '{value}'"))?;
+                let status = raw.required_u16("wait_for_status")?;
                 Ok(Self::WaitForStatus { status, timeout })
             }
             "wait_for_text" => {
@@ -245,6 +242,12 @@ impl RawStep {
                 .map_err(|_| format!("action '{action}' value '{text}' is not a valid number")),
             None => Err(format!("action '{action}' requires a numeric value")),
         }
+    }
+
+    fn required_u16(&self, action: &str) -> Result<u16, String> {
+        let value = self.required_u64(action)?;
+        u16::try_from(value)
+            .map_err(|_| format!("action '{action}' value '{value}' is out of range for u16"))
     }
 }
 

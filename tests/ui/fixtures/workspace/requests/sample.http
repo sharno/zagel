@@ -1,6 +1,6 @@
-GET https://httpbin.org/get
+GET http://127.0.0.1:18080/get
 Accept: application/json
 
 ###
-GET https://httpbin.org/uuid
+GET http://127.0.0.1:18080/uuid
 Accept: application/json

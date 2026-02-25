@@ -69,6 +69,9 @@ fn next_path(
     flag: &'static str,
 ) -> Result<PathBuf, CliError> {
     let raw = iter.next().ok_or(CliError::MissingValue(flag))?;
+    if raw.to_str().is_some_and(|value| value.starts_with('-')) {
+        return Err(CliError::MissingValue(flag));
+    }
     resolve_path(raw)
 }
 
@@ -180,5 +183,17 @@ mod tests {
 
         let err = parse_args(args).expect_err("missing automation scenario should fail");
         assert!(matches!(err, CliError::MissingAutomationScenario));
+    }
+
+    #[test]
+    fn missing_value_is_reported_when_next_token_is_a_flag() {
+        let args = vec![
+            OsString::from("--state-file"),
+            OsString::from("--project-root"),
+            OsString::from("./workspace"),
+        ];
+
+        let err = parse_args(args).expect_err("missing value should fail");
+        assert!(matches!(err, CliError::MissingValue("--state-file")));
     }
 }
