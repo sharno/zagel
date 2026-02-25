@@ -9,7 +9,7 @@ use crate::model::Method;
 // Design tokens — Cosmic DE-inspired spacing & corner-radius system
 // ---------------------------------------------------------------------------
 
-/// Spacing tokens (px): 4 / 8 / 12 / 16 / 24 / 32.
+/// Spacing tokens (px): 2 / 4 / 6 / 8 / 12 / 16 / 24 / 32.
 #[allow(dead_code)]
 pub mod spacing {
     pub const XXXS: f32 = 2.0;

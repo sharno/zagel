@@ -86,7 +86,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         .width(Length::FillPortion(4));
     let add_project = tooltip(
         button(
-            row![icons::plus_circle().size(typo::BODY), text("Add").size(typo::BODY)]
+            row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
                 .spacing(spacing::XXS)
                 .align_y(Alignment::Center),
         )
@@ -106,7 +106,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
                 row![
                     text(root.as_path().display().to_string()).size(typo::CAPTION),
                     tooltip(
-                        button(icons::dash_circle().size(typo::BODY))
+                        button(remove_action_icon(ctx.icon_set))
                             .on_press(Message::RemoveProject(root.clone()))
                             .padding([spacing::XXXS, spacing::XXS])
                             .style(theme::ghost_button_style),
@@ -126,7 +126,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         .width(Length::FillPortion(4));
     let add_global = tooltip(
         button(
-            row![icons::plus_circle().size(typo::BODY), text("Add").size(typo::BODY)]
+            row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
                 .spacing(spacing::XXS)
                 .align_y(Alignment::Center),
         )
@@ -146,7 +146,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
                 row![
                     text(root.as_path().display().to_string()).size(typo::CAPTION),
                     tooltip(
-                        button(icons::dash_circle().size(typo::BODY))
+                        button(remove_action_icon(ctx.icon_set))
                             .on_press(Message::RemoveGlobalEnvRoot(root.clone()))
                             .padding([spacing::XXXS, spacing::XXS])
                             .style(theme::ghost_button_style),
@@ -164,7 +164,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         text("Requests").size(typo::TITLE),
         tooltip(
             button(
-                row![icons::plus_circle().size(typo::BODY), text("Add").size(typo::BODY)]
+                row![add_action_icon(ctx.icon_set), text("Add").size(typo::BODY)]
                     .spacing(spacing::XXS)
                     .align_y(Alignment::Center),
             )
@@ -181,7 +181,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         let selection_empty = edit_selection.is_none_or(HashSet::is_empty);
         let delete_button = if selection_empty {
             button(
-                row![icons::trash().size(typo::BODY), text("Delete").size(typo::BODY)]
+                row![delete_action_icon(ctx.icon_set), text("Delete").size(typo::BODY)]
                     .spacing(spacing::XXS)
                     .align_y(Alignment::Center),
             )
@@ -189,7 +189,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
             .style(theme::destructive_button_style)
         } else {
             button(
-                row![icons::trash().size(typo::BODY), text("Delete").size(typo::BODY)]
+                row![delete_action_icon(ctx.icon_set), text("Delete").size(typo::BODY)]
                     .spacing(spacing::XXS)
                     .align_y(Alignment::Center),
             )
@@ -201,7 +201,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
             .push(delete_button)
             .push(
                 button(
-                    row![icons::check_lg().size(typo::BODY), text("Done").size(typo::BODY)]
+                    row![done_action_icon(ctx.icon_set), text("Done").size(typo::BODY)]
                         .spacing(spacing::XXS)
                         .align_y(Alignment::Center),
                 )
@@ -212,7 +212,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         header = header.push(
             tooltip(
                 button(
-                    row![icons::pencil().size(typo::BODY), text("Edit").size(typo::BODY)]
+                    row![edit_action_icon(ctx.icon_set), text("Edit").size(typo::BODY)]
                         .spacing(spacing::XXS)
                         .align_y(Alignment::Center),
                 )
@@ -450,6 +450,41 @@ fn checkbox_icon(checked: bool, icon_set: IconSet) -> Element<'static, Message> 
             let label = if checked { "[x]" } else { "[ ]" };
             text(label).size(typo::CAPTION).into()
         }
+    }
+}
+
+fn add_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::plus_circle().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("+").size(typo::BODY)),
+    }
+}
+
+fn remove_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::dash_circle().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("-").size(typo::BODY)),
+    }
+}
+
+fn delete_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::trash().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("x").size(typo::BODY)),
+    }
+}
+
+fn done_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::check_lg().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("v").size(typo::BODY)),
+    }
+}
+
+fn edit_action_icon(icon_set: IconSet) -> Element<'static, Message> {
+    match icon_set {
+        IconSet::Bootstrap => Element::from(icons::pencil().size(typo::BODY)),
+        IconSet::Ascii => Element::from(text("~").size(typo::BODY)),
     }
 }
 

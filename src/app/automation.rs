@@ -478,6 +478,8 @@ impl Zagel {
                 }
                 Err(err) => self.fail_automation(&mut runtime, &err),
             }
+        } else if runtime.done {
+            Task::none()
         } else {
             self.fail_automation(
                 &mut runtime,
