@@ -17,8 +17,12 @@ class Zagel < Formula
   end
 
   on_linux do
-    url "https://github.com/sharno/zagel/releases/download/v0.3.0/zagel-v0.3.0-x86_64-unknown-linux-gnu.tar.gz"
-    sha256 "34825a3308d806661e684f76327edfdacf6dbdaf8bb7e768072c5a820d628b5e"
+    if Hardware::CPU.intel?
+      url "https://github.com/sharno/zagel/releases/download/v0.3.0/zagel-v0.3.0-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "34825a3308d806661e684f76327edfdacf6dbdaf8bb7e768072c5a820d628b5e"
+    else
+      odie "zagel currently supports x86_64 Linux only"
+    end
   end
 
   def install

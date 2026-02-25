@@ -8,6 +8,10 @@ import hashlib
 from pathlib import Path
 
 
+class ReleaseArtifactsError(RuntimeError):
+    pass
+
+
 def sha256_for_file(path: Path) -> str:
     hasher = hashlib.sha256()
     with path.open("rb") as handle:
@@ -38,7 +42,7 @@ def main() -> int:
     output_path = args.output
 
     if not dist_dir.exists() or not dist_dir.is_dir():
-        raise FileNotFoundError(f"dist directory does not exist: {dist_dir}")
+        raise ReleaseArtifactsError(f"dist directory does not exist: {dist_dir}")
 
     files = sorted(
         [
@@ -49,7 +53,7 @@ def main() -> int:
         key=lambda file: file.name,
     )
     if not files:
-        raise RuntimeError(f"no release artifacts found in {dist_dir}")
+        raise ReleaseArtifactsError(f"no release artifacts found in {dist_dir}")
 
     lines = [f"{sha256_for_file(file)}  {file.name}" for file in files]
     output_path.parent.mkdir(parents=True, exist_ok=True)

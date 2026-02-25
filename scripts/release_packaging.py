@@ -8,7 +8,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 import textwrap
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
+    import tomli as tomllib  # type: ignore[no-redef]
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass(frozen=True)
@@ -32,16 +39,15 @@ def parse_args() -> argparse.Namespace:
         default=Path("packaging"),
         help="Directory to write manifests into (default: packaging)",
     )
-    parser.add_argument(
-        "--repository",
-        default="sharno/zagel",
-        help="GitHub repository owner/name (default: sharno/zagel)",
-    )
     return parser.parse_args()
 
 
 def read_cargo_metadata() -> dict[str, str]:
-    cargo_data = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))
+    cargo_toml = REPO_ROOT / "Cargo.toml"
+    if not cargo_toml.is_file():
+        raise FileNotFoundError(f"could not find Cargo.toml at {cargo_toml}")
+
+    cargo_data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
     package = cargo_data["package"]
     return {
         "name": package["name"],
@@ -114,8 +120,12 @@ def build_homebrew_formula(
           end
 
           on_linux do
-            url \"{linux_asset.url}\"
-            sha256 \"{linux_asset.sha256}\"
+            if Hardware::CPU.intel?
+              url \"{linux_asset.url}\"
+              sha256 \"{linux_asset.sha256}\"
+            else
+              odie \"zagel currently supports x86_64 Linux only\"
+            end
           end
 
           def install
@@ -277,7 +287,7 @@ def build_aur_pkgbuild(
         pkgdesc='{metadata["description"]}'
         arch=('x86_64')
         url='{metadata["repository"]}'
-        license=('MIT' 'Apache')
+        license=('{metadata["license"]}')
         depends=('glibc')
         source=('zagel-v${{pkgver}}-x86_64-unknown-linux-gnu.tar.gz::{linux_asset.url}')
         sha256sums=('{linux_asset.sha256}')

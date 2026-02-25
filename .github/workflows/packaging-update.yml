@@ -29,11 +29,14 @@ jobs:
         id: tag
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
+          if [ "$EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
           else
             tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName')"
           fi
@@ -57,8 +60,7 @@ jobs:
         run: |
           python3 scripts/release_packaging.py \
             --release-json release.json \
-            --output-dir packaging \
-            --repository "$GITHUB_REPOSITORY"
+            --output-dir packaging
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@v6
