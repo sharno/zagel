@@ -63,7 +63,7 @@ Bundled scenarios in `tests/ui/scenarios/`:
 Run E2E automation test locally (opt-in):
 
 ```bash
-ZAGEL_E2E=1 ZAGEL_E2E_ARTIFACTS_DIR=artifacts/e2e cargo test --locked --test e2e_automation -- --nocapture
+ZAGEL_E2E=1 ZAGEL_E2E_ARTIFACTS_DIR=artifacts/e2e cargo test --locked --test e2e_automation -- --nocapture --test-threads=1
 ```
 
 Release build:

@@ -82,7 +82,7 @@ jobs:
       - name: Run automation e2e tests
         run: |
           mkdir -p artifacts/e2e
-          xvfb-run -a env ZAGEL_E2E=1 ZAGEL_E2E_ARTIFACTS_DIR=artifacts/e2e cargo test --locked --test e2e_automation -- --nocapture
+          xvfb-run -a env ZAGEL_E2E=1 ZAGEL_E2E_ARTIFACTS_DIR=artifacts/e2e cargo test --locked --test e2e_automation -- --nocapture --test-threads=1
 
       - name: Upload automation artifacts
         if: always()
