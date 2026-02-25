@@ -1,0 +1,21 @@
+{
+  "version": "0.3.0",
+  "description": "Desktop REST workbench with .http/.env collections and persisted state.",
+  "homepage": "https://github.com/sharno/zagel",
+  "license": "MIT OR Apache-2.0",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/sharno/zagel/releases/download/v0.3.0/zagel-v0.3.0-x86_64-pc-windows-msvc.zip",
+      "hash": "df65dd7fa19335b681ea9705a6acad3b38099c07c912164450c7ab0489039107"
+    }
+  },
+  "bin": "zagel.exe",
+  "checkver": "github",
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/sharno/zagel/releases/download/v$version/zagel-v$version-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}
