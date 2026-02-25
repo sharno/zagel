@@ -1,6 +1,8 @@
 use ego_tree::NodeRef;
 use iced::widget::text::Wrapping;
-use iced::widget::{button, column, container, pick_list, row, rule, text, text_editor};
+use iced::widget::{
+    button, column, container, pick_list, row, rule, scrollable, text, text_editor,
+};
 use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 use scraper::{Html, Node};
@@ -254,10 +256,12 @@ pub fn response_panel<'a>(
             .spacing(6)
             .into();
 
-            let headers_section: Element<'_, Message> =
-                column![text("Headers").size(14), headers_view.spacing(4),]
-                    .spacing(6)
-                    .into();
+            let headers_section: Element<'_, Message> = column![
+                text("Headers").size(14),
+                scrollable(headers_view.spacing(4)).height(Length::Fill),
+            ]
+            .spacing(6)
+            .into();
 
             let tab_view: Element<'_, Message> = match tab {
                 ResponseTab::Body => body_section,

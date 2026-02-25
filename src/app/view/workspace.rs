@@ -258,11 +258,7 @@ fn response(app: &Zagel) -> Element<'_, Message> {
             .into(),
     );
 
-    let response_scroll = scrollable(response_section)
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-    let base = container(response_scroll)
+    let base = container(response_section)
         .padding(8)
         .width(Length::Fill)
         .height(Length::Fill)
