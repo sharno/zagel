@@ -5,12 +5,13 @@ use iced::widget::{Space, button, column, container, row, scrollable, text, text
 use iced::{Alignment, Element, Length};
 
 use crate::pathing::{GlobalEnvRoot, ProjectRoot};
+use crate::theme;
 
 use super::super::{EditState, EditTarget, Message};
 use super::section;
 use crate::model::{HttpFile, RequestDraft, RequestId};
 
-const INDENT: i16 = 10;
+const INDENT: i16 = 14;
 
 #[derive(Debug, Clone, Copy)]
 pub enum IconSet {
@@ -114,19 +115,23 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
 
     let project_input = text_input("C:/path/to/project", ctx.project_path_input)
         .on_input(Message::ProjectPathInputChanged)
-        .padding(4)
+        .padding(6)
         .width(Length::FillPortion(4));
-    let add_project = button("Add project").on_press(Message::AddProject);
+    let add_project = button("Add project")
+        .on_press(Message::AddProject)
+        .padding([5, 10]);
 
     let mut project_roots = column![row![project_input, add_project].spacing(6)].spacing(6);
     if ctx.project_roots.is_empty() {
-        project_roots = project_roots.push(text("No projects configured").size(13));
+        project_roots = project_roots.push(text("No projects configured").size(12));
     } else {
         for root in ctx.project_roots {
             project_roots = project_roots.push(
                 row![
-                    text(root.as_path().display().to_string()).size(13),
-                    button("Remove").on_press(Message::RemoveProject(root.clone())),
+                    text(root.as_path().display().to_string()).size(12),
+                    button("Remove")
+                        .on_press(Message::RemoveProject(root.clone()))
+                        .padding([3, 8]),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(6),
@@ -136,19 +141,23 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
 
     let global_env_input = text_input("C:/path/to/global/envs", ctx.global_env_path_input)
         .on_input(Message::GlobalEnvPathInputChanged)
-        .padding(4)
+        .padding(6)
         .width(Length::FillPortion(4));
-    let add_global = button("Add global envs").on_press(Message::AddGlobalEnvRoot);
+    let add_global = button("Add global envs")
+        .on_press(Message::AddGlobalEnvRoot)
+        .padding([5, 10]);
 
     let mut global_env_roots = column![row![global_env_input, add_global].spacing(6)].spacing(6);
     if ctx.global_env_roots.is_empty() {
-        global_env_roots = global_env_roots.push(text("No global env folders").size(13));
+        global_env_roots = global_env_roots.push(text("No global env folders").size(12));
     } else {
         for root in ctx.global_env_roots {
             global_env_roots = global_env_roots.push(
                 row![
-                    text(root.as_path().display().to_string()).size(13),
-                    button("Remove").on_press(Message::RemoveGlobalEnvRoot(root.clone())),
+                    text(root.as_path().display().to_string()).size(12),
+                    button("Remove")
+                        .on_press(Message::RemoveGlobalEnvRoot(root.clone()))
+                        .padding([3, 8]),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(6),
@@ -157,23 +166,35 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     }
 
     let mut header = row![
-        text("Requests").size(20),
-        button("Add").on_press(Message::AddRequest)
+        text("Requests").size(16),
+        button("Add")
+            .on_press(Message::AddRequest)
+            .padding([4, 10])
     ]
     .align_y(Alignment::Center)
     .spacing(6);
     if editing {
         let selection_empty = edit_selection.is_none_or(HashSet::is_empty);
         let delete_button = if selection_empty {
-            button("Delete")
+            button("Delete").padding([4, 10])
         } else {
-            button("Delete").on_press(Message::DeleteSelected)
+            button("Delete")
+                .on_press(Message::DeleteSelected)
+                .padding([4, 10])
         };
         header = header
             .push(delete_button)
-            .push(button("Done").on_press(Message::ToggleEditMode));
+            .push(
+                button("Done")
+                    .on_press(Message::ToggleEditMode)
+                    .padding([4, 10]),
+            );
     } else {
-        header = header.push(button("Edit").on_press(Message::ToggleEditMode));
+        header = header.push(
+            button("Edit")
+                .on_press(Message::ToggleEditMode)
+                .padding([4, 10]),
+        );
     }
 
     let mut tree = TreeNode::default();
@@ -234,7 +255,7 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
         edit_selection,
         icons,
     };
-    let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(4);
+    let list = render_tree(column![], &tree, "", 0, &render_ctx).spacing(3);
     let project_section = section("Projects", project_roots.into());
     let global_env_section = section("Global Environments", global_env_roots.into());
     let collections_section = section("Collections", list.into());
@@ -252,9 +273,10 @@ pub fn sidebar(ctx: SidebarContext<'_>) -> Element<'_, Message> {
     .height(Length::Fill);
 
     container(list)
-        .padding(8)
+        .padding(10)
         .width(Length::Fill)
         .height(Length::Fill)
+        .style(theme::sidebar_container_style)
         .into()
 }
 
@@ -371,7 +393,7 @@ fn collection_row<'a>(
     };
     let toggle = button(text(toggle_label))
         .style(button::secondary)
-        .padding([2, 4])
+        .padding([3, 6])
         .on_press(Message::ToggleCollection(full_path.to_string()));
 
     let mut row_widgets = row![Space::new().width(Length::Fixed(indent_px(depth))), toggle];
@@ -389,17 +411,17 @@ fn collection_row<'a>(
         row_widgets = row_widgets
             .push(
                 button(text(label))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::ToggleEditSelection(target)),
             )
             .push(
                 button(text(ctx.icons.move_up))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::MoveCollectionUp(collection_path.clone())),
             )
             .push(
                 button(text(ctx.icons.move_down))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::MoveCollectionDown(collection_path)),
             );
     }
@@ -415,20 +437,23 @@ fn collection_row<'a>(
         };
 
         row_widgets.push(
-            button(text(child.name.clone()).size(14))
+            button(text(child.name.clone()).size(13))
                 .style(if is_selected {
                     button::primary
                 } else {
                     button::secondary
                 })
+                .padding([4, 8])
                 .width(Length::Fill)
                 .on_press(Message::Select(select_id)),
         )
     } else {
-        row_widgets.push(text(child.name.clone()).size(14))
+        row_widgets.push(text(child.name.clone()).size(13))
     };
 
-    row_widgets.spacing(4)
+    row_widgets
+        .spacing(4)
+        .align_y(Alignment::Center)
 }
 
 fn request_row<'a>(
@@ -458,30 +483,33 @@ fn request_row<'a>(
         row_widgets = row_widgets
             .push(
                 button(text(select_label))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::ToggleEditSelection(target)),
             )
             .push(
                 button(text(ctx.icons.move_up))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::MoveRequestUp(item.id.clone())),
             )
             .push(
                 button(text(ctx.icons.move_down))
-                    .padding([2, 4])
+                    .padding([3, 6])
                     .on_press(Message::MoveRequestDown(item.id.clone())),
             );
     }
     row_widgets = row_widgets.push(
-        button(text(label))
+        button(text(label).size(13))
             .style(if is_selected {
                 button::primary
             } else {
                 button::secondary
             })
+            .padding([4, 8])
             .width(Length::Fill)
             .on_press(Message::Select(item.id.clone())),
     );
 
-    row_widgets.spacing(4)
+    row_widgets
+        .spacing(4)
+        .align_y(Alignment::Center)
 }

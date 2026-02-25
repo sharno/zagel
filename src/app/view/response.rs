@@ -169,22 +169,24 @@ impl std::fmt::Display for ResponseTab {
 
 /// Creates a toggle widget for switching between Body and Headers tabs in the response view.
 pub fn response_tab_toggle(current: ResponseTab) -> Element<'static, Message> {
-    let body = button(text("Body"))
+    let body = button(text("Body").size(13))
         .style(if current == ResponseTab::Body {
             button::primary
         } else {
             button::secondary
         })
+        .padding([5, 10])
         .on_press(Message::ResponseTabChanged(ResponseTab::Body));
-    let headers = button(text("Headers"))
+    let headers = button(text("Headers").size(13))
         .style(if current == ResponseTab::Headers {
             button::primary
         } else {
             button::secondary
         })
+        .padding([5, 10])
         .on_press(Message::ResponseTabChanged(ResponseTab::Headers));
 
-    row![body, headers].spacing(6).into()
+    row![body, headers].spacing(4).into()
 }
 
 /// Creates a pick list widget for switching between Raw and Pretty response display modes.
@@ -210,7 +212,7 @@ pub fn response_panel<'a>(
     highlight_theme: HighlightTheme,
 ) -> Element<'a, Message> {
     response.map_or_else(
-        || text("No response yet").into(),
+        || text("No response yet").size(13).into(),
         |response| {
             let resp = &response.preview;
             let body = &response.body;
@@ -250,15 +252,15 @@ pub fn response_panel<'a>(
                         (ResponseDisplay::Raw, _) => "raw",
                     }
                 ))
-                .size(14),
+                .size(12),
                 body_editor,
             ]
             .spacing(6)
             .into();
 
             let headers_section: Element<'_, Message> = column![
-                text("Headers").size(14),
-                scrollable(headers_view.spacing(4)).height(Length::Fill),
+                text("Headers").size(12),
+                scrollable(headers_view.spacing(3)).height(Length::Fill),
             ]
             .spacing(6)
             .into();
@@ -269,11 +271,11 @@ pub fn response_panel<'a>(
             };
 
             column![
-                text(header).size(16),
+                text(header).size(14),
                 rule::horizontal(1),
                 container(tab_view).height(Length::Fill),
             ]
-            .spacing(6)
+            .spacing(8)
             .height(Length::Fill)
             .into()
         },
@@ -582,7 +584,7 @@ fn html_parse_mode(raw: &str) -> HtmlParseMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{HtmlParseMode, html_parse_mode, pretty_html};
+    use super::{html_parse_mode, pretty_html, HtmlParseMode};
 
     #[test]
     fn html_parse_mode_detects_document_markers() {

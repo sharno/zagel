@@ -4,7 +4,7 @@ mod sidebar;
 mod workspace;
 
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{column, container, row, rule, space, text};
+use iced::widget::{column, container, row, space, text};
 use iced::{Element, Length};
 
 use super::{Message, Zagel};
@@ -14,6 +14,8 @@ use workspace::workspace;
 pub use response::{ResponseData, ResponseDisplay, ResponseTab};
 pub use sidebar::IconSet;
 pub use workspace::{BuilderPane, WorkspacePane};
+
+use crate::theme;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PaneContent {
@@ -25,11 +27,17 @@ pub fn section<'a, Message: 'a>(
     title: &'a str,
     content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    container(column![text(title).size(15), rule::horizontal(1), content].spacing(6))
-        .padding(12)
-        .width(Length::Fill)
-        .style(container::bordered_box)
-        .into()
+    container(
+        column![
+            text(title).size(13).color(iced::Color::from_rgba(0.6, 0.65, 0.75, 0.85)),
+            content,
+        ]
+        .spacing(8),
+    )
+    .padding(12)
+    .width(Length::Fill)
+    .style(theme::section_container_style)
+    .into()
 }
 
 pub fn view(app: &Zagel) -> Element<'_, Message> {
@@ -52,12 +60,11 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(8.0)
+    .spacing(2.0)
     .on_resize(6, Message::PaneResized);
 
     column![
         container(grid).height(Length::Fill),
-        rule::horizontal(1),
         status_bar(app_ref)
     ]
     .into()
@@ -71,11 +78,15 @@ fn status_bar(app: &Zagel) -> Element<'_, Message> {
     };
 
     let content = row![
-        text(hint).size(12),
+        text(hint).size(11),
         space().width(Length::Fill),
-        text(format!("Status: {}", app.status_line)).size(12),
+        text(format!("Status: {}", app.status_line)).size(11),
     ]
-    .spacing(8);
+    .spacing(12);
 
-    container(content).padding([6, 12]).into()
+    container(content)
+        .padding([5, 14])
+        .width(Length::Fill)
+        .style(theme::status_bar_style)
+        .into()
 }
