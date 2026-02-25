@@ -74,6 +74,7 @@ jobs:
             libxcursor-dev \
             libxi-dev \
             libxkbcommon-dev \
+            libxkbcommon-x11-0 \
             libwayland-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
