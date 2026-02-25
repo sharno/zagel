@@ -74,3 +74,30 @@ jobs:
           name: automation-e2e-artifacts
           path: artifacts/e2e
           if-no-files-found: warn
+
+      - name: Post screenshot links to PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(find artifacts/e2e -name '*.png' 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No screenshots found, skipping PR comment."
+            exit 0
+          fi
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          listing=$(find artifacts/e2e -name '*.png' -printf '%f\n' 2>/dev/null | sort)
+
+          body="## Automation Screenshots"$'\n\n'
+          body+="**${count} screenshot(s)** captured during this CI run."$'\n\n'
+          body+="| File | Size |"$'\n'
+          body+="| --- | --- |"$'\n'
+          for img in $(find artifacts/e2e -name '*.png' 2>/dev/null | sort); do
+            name=$(basename "$img")
+            size=$(du -h "$img" | cut -f1)
+            body+="| ${name} | ${size} |"$'\n'
+          done
+          body+=$'\n'"Download: [automation-e2e-artifacts](${run_url}) (see Artifacts section at bottom of the run page)"
+
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$body"
