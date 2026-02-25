@@ -1,0 +1,42 @@
+name: Setup Linux Rust build environment
+description: Install Rust toolchain, cache, and Linux system dependencies
+inputs:
+  extra-packages:
+    description: Optional extra apt packages (space separated)
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Linux system dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        packages=(
+          pkg-config
+          libudev-dev
+          libx11-dev
+          libxrandr-dev
+          libxinerama-dev
+          libxcursor-dev
+          libxi-dev
+          libxkbcommon-dev
+          libwayland-dev
+          libxcb-shape0-dev
+          libxcb-xfixes0-dev
+        )
+
+        extra='${{ inputs.extra-packages }}'
+        if [ -n "$extra" ]; then
+          read -r -a extra_packages <<< "$extra"
+          packages+=("${extra_packages[@]}")
+        fi
+
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "${packages[@]}"

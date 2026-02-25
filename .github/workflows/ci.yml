@@ -24,23 +24,6 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config \
-            libudev-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev
-
       - name: Build
         run: cargo build --release --locked
 
@@ -55,27 +38,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config \
-            libudev-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev
+      - name: Setup Linux build environment
+        uses: ./.github/actions/setup-linux
 
       - name: Build
         run: cargo build --release --locked
@@ -93,29 +57,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config \
-            libudev-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-0 \
-            libwayland-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            xvfb
+      - name: Setup Linux build environment
+        uses: ./.github/actions/setup-linux
+        with:
+          extra-packages: libxkbcommon-x11-0 xvfb
 
       - name: Run automation e2e tests
         run: |
