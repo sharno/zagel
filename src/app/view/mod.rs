@@ -5,7 +5,7 @@ mod workspace;
 
 use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{column, container, row, space, text};
-use iced::{Element, Length};
+use iced::{Alignment, Element, Length};
 
 use super::{Message, Zagel};
 use sidebar::{SidebarContext, sidebar};
@@ -15,7 +15,7 @@ pub use response::{ResponseData, ResponseDisplay, ResponseTab};
 pub use sidebar::IconSet;
 pub use workspace::{BuilderPane, WorkspacePane};
 
-use crate::theme;
+use crate::theme::{self, spacing, typo};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PaneContent {
@@ -23,18 +23,23 @@ pub enum PaneContent {
     Workspace,
 }
 
-pub fn section<'a, Message: 'a>(
+/// Section card with an icon next to the title.
+pub fn section<'a, M: 'a>(
     title: &'a str,
-    content: Element<'a, Message>,
-) -> Element<'a, Message> {
+    icon: impl Into<Element<'a, M>>,
+    content: Element<'a, M>,
+) -> Element<'a, M> {
+    let title_row = row![
+        icon.into(),
+        text(title).size(typo::BODY),
+    ]
+    .spacing(spacing::XXS)
+    .align_y(Alignment::Center);
+
     container(
-        column![
-            text(title).size(13).color(iced::Color::from_rgba(0.6, 0.65, 0.75, 0.85)),
-            content,
-        ]
-        .spacing(8),
+        column![title_row, content].spacing(spacing::SM),
     )
-    .padding(12)
+    .padding(spacing::MD)
     .width(Length::Fill)
     .style(theme::section_container_style)
     .into()
@@ -60,7 +65,7 @@ pub fn view(app: &Zagel) -> Element<'_, Message> {
     })
     .width(Length::Fill)
     .height(Length::Fill)
-    .spacing(2.0)
+    .spacing(spacing::XXXS)
     .on_resize(6, Message::PaneResized);
 
     column![
@@ -78,14 +83,14 @@ fn status_bar(app: &Zagel) -> Element<'_, Message> {
     };
 
     let content = row![
-        text(hint).size(11),
+        text(hint).size(typo::CAPTION),
         space().width(Length::Fill),
-        text(format!("Status: {}", app.status_line)).size(11),
+        text(format!("Status: {}", app.status_line)).size(typo::CAPTION),
     ]
-    .spacing(12);
+    .spacing(spacing::MD);
 
     container(content)
-        .padding([5, 14])
+        .padding([spacing::XXS, spacing::LG])
         .width(Length::Fill)
         .style(theme::status_bar_style)
         .into()

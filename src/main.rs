@@ -2,6 +2,7 @@
 
 mod app;
 mod cli;
+mod icons;
 mod launch;
 mod model;
 mod net;
