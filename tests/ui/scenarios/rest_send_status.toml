@@ -1,0 +1,23 @@
+name = "rest-send-status"
+
+[[step]]
+action = "select_request"
+value = "requests/sample.http#1"
+timeout_ms = 10000
+
+[[step]]
+action = "send"
+
+[[step]]
+action = "wait_for_status"
+value = 200
+timeout_ms = 30000
+
+[[step]]
+action = "wait_for_text"
+value = "uuid"
+timeout_ms = 30000
+
+[[step]]
+action = "screenshot"
+value = "send-status"

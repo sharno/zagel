@@ -62,4 +62,8 @@ pub enum Message {
     MoveRequestDown(RequestId),
     AddRequest,
     ToggleShortcutsHelp,
+    AutomationStart,
+    AutomationPoll,
+    AutomationWindowResolved(Option<iced::window::Id>),
+    AutomationScreenshotCaptured(iced::window::Screenshot),
 }

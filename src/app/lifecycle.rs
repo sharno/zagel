@@ -6,11 +6,13 @@ use iced::widget::pane_grid;
 use iced::{Subscription, Task, Theme, application};
 use reqwest::Client;
 
+use crate::launch::LaunchOptions;
 use crate::model::{RequestDraft, RequestId};
 use crate::parser::{scan_env_files, scan_http_files};
 use crate::pathing::{GlobalEnvRoot, ProjectRoot, SaveFilePath};
 use crate::state::AppState;
 
+use super::automation::AutomationRuntime;
 use super::domain::{
     AddRequestPlan, AddRequestPlanError, ProjectConfiguration, SavePlan, SavePlanError, SaveTarget,
     WorkspaceState,
@@ -109,6 +111,7 @@ pub struct Zagel {
     pub(super) workspace_panes: pane_grid::State<crate::app::view::WorkspacePane>,
     pub(super) builder_panes: pane_grid::State<crate::app::view::BuilderPane>,
     pub(super) collapsed_collections: BTreeSet<String>,
+    pub(super) automation: Option<AutomationRuntime>,
 }
 
 fn load_configured_roots(state: &AppState) -> (ProjectConfiguration, Vec<String>) {
@@ -143,8 +146,15 @@ fn load_configured_roots(state: &AppState) -> (ProjectConfiguration, Vec<String>
 }
 
 impl Zagel {
-    pub(super) fn init() -> (Self, Task<Message>) {
-        let state = AppState::load();
+    pub(super) fn init(launch: LaunchOptions) -> (Self, Task<Message>) {
+        let mut state = AppState::load();
+        if !launch.project_roots.is_empty() {
+            state.project_roots.clone_from(&launch.project_roots);
+            state.http_root = state.project_roots.first().cloned();
+        }
+        if !launch.global_env_roots.is_empty() {
+            state.global_env_roots.clone_from(&launch.global_env_roots);
+        }
         let (configuration, startup_warnings) = load_configured_roots(&state);
         let startup_status = StartupStatus::from_context(&startup_warnings, &configuration);
         let initial_status_line = startup_status.status_line();
@@ -212,6 +222,7 @@ impl Zagel {
             workspace_panes,
             builder_panes,
             collapsed_collections: BTreeSet::new(),
+            automation: None,
         };
 
         for warning in &startup_warnings {
@@ -219,7 +230,7 @@ impl Zagel {
         }
 
         app.refresh_visible_environments();
-        let task = if app.should_scan() {
+        let mut task = if app.should_scan() {
             if startup_warnings.is_empty() {
                 app.update_status_with_missing("Ready");
             }
@@ -227,16 +238,34 @@ impl Zagel {
         } else {
             Task::none()
         };
+
+        if let Some(automation_options) = launch.automation {
+            match AutomationRuntime::load(automation_options) {
+                Ok(runtime) => {
+                    app.automation = Some(runtime);
+                    task = Task::batch([task, app.automation_start_task()]);
+                }
+                Err(err) => {
+                    app.update_status_with_missing(&format!("Automation disabled: {err}"));
+                    eprintln!("automation: {err}");
+                }
+            }
+        }
+
         app.persist_state();
         (app, task)
     }
 
     pub(super) fn subscription(state: &Self) -> Subscription<Message> {
         let watch_roots = state.watch_roots_paths();
-        Subscription::batch([
+        let mut subscriptions = vec![
             hotkeys::subscription(),
             watcher::subscription_many(watch_roots),
-        ])
+        ];
+        if let Some(automation) = state.automation_subscription() {
+            subscriptions.push(automation);
+        }
+        Subscription::batch(subscriptions)
     }
 
     pub(super) const fn theme(state: &Self) -> Theme {
@@ -483,10 +512,14 @@ impl Zagel {
     }
 }
 
-pub fn run() -> iced::Result {
-    application(Zagel::init, Zagel::update, view::view)
-        .title("Zagel - REST workbench")
-        .subscription(Zagel::subscription)
-        .theme(Zagel::theme)
-        .run()
+pub fn run(launch: LaunchOptions) -> iced::Result {
+    application(
+        move || Zagel::init(launch.clone()),
+        Zagel::update,
+        view::view,
+    )
+    .title("Zagel - REST workbench")
+    .subscription(Zagel::subscription)
+    .theme(Zagel::theme)
+    .run()
 }

@@ -1,14 +1,13 @@
 use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{
-    button, column, container, pick_list, row, scrollable, stack, text, text_editor,
-    text_input,
+    button, column, container, pick_list, row, scrollable, stack, text, text_editor, text_input,
 };
-use iced::{alignment, Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme, alignment};
 
 use super::super::{Message, Zagel, headers};
-use super::section;
 use super::auth::auth_editor;
 use super::response::{response_panel, response_tab_toggle, response_view_toggle};
+use super::section;
 use crate::app::options::RequestMode;
 use crate::model::{Method, RequestId};
 use crate::theme;
@@ -70,12 +69,12 @@ fn builder(app: &Zagel) -> Element<'_, Message> {
 fn builder_form(app: &Zagel) -> Element<'_, Message> {
     let env_pick = container(
         pick_list(
-        app.environments
-            .iter()
-            .map(|e| e.name.clone())
-            .collect::<Vec<_>>(),
-        Some(app.environments[app.active_environment].name.clone()),
-        Message::EnvironmentChanged,
+            app.environments
+                .iter()
+                .map(|e| e.name.clone())
+                .collect::<Vec<_>>(),
+            Some(app.environments[app.active_environment].name.clone()),
+            Message::EnvironmentChanged,
         )
         .width(Length::Fill),
     )
@@ -84,9 +83,9 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 
     let method_pick = container(
         pick_list(
-        Method::ALL.to_vec(),
-        Some(app.draft.method),
-        Message::MethodSelected,
+            Method::ALL.to_vec(),
+            Some(app.draft.method),
+            Message::MethodSelected,
         )
         .width(Length::Fill),
     )
@@ -125,9 +124,9 @@ fn builder_form(app: &Zagel) -> Element<'_, Message> {
 
     let mode_pick = container(
         pick_list(
-        RequestMode::ALL.to_vec(),
-        Some(app.mode),
-        Message::ModeChanged,
+            RequestMode::ALL.to_vec(),
+            Some(app.mode),
+            Message::ModeChanged,
         )
         .width(Length::Fill),
     )
@@ -197,15 +196,10 @@ fn builder_body(app: &Zagel) -> Element<'_, Message> {
                 text_editor(&app.graphql_variables)
                     .on_action(Message::GraphqlVariablesEdited)
                     .height(Length::FillPortion(2));
-            column![
-                text("Query"),
-                query_editor,
-                text("Variables"),
-                vars_editor,
-            ]
-            .height(Length::Fill)
-            .spacing(6)
-            .into()
+            column![text("Query"), query_editor, text("Variables"), vars_editor,]
+                .height(Length::Fill)
+                .spacing(6)
+                .into()
         }
         RequestMode::Rest => {
             let body_editor: iced::widget::TextEditor<'_, _, _, Theme> =
@@ -243,7 +237,8 @@ fn response(app: &Zagel) -> Element<'_, Message> {
                 .and_then(|response| response.body.pretty_text())
                 .is_some()
         {
-            status_row = status_row.push(button("Copy pretty").on_press(Message::CopyResponsePretty));
+            status_row =
+                status_row.push(button("Copy pretty").on_press(Message::CopyResponsePretty));
         }
     }
 

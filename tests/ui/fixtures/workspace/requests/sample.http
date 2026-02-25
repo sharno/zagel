@@ -1,0 +1,6 @@
+GET https://httpbin.org/get
+Accept: application/json
+
+###
+GET https://httpbin.org/uuid
+Accept: application/json

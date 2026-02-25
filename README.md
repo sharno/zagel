@@ -26,6 +26,46 @@ Download a prebuilt binary from GitHub Releases (recommended), or build from sou
 cargo run
 ```
 
+### Automation mode (UI actions + screenshots)
+
+You can run scripted UI flows for repeatable testing and screenshot capture:
+
+```bash
+cargo run -- \
+  --state-file ./.tmp/zagel-state.toml \
+  --project-root ./tests/ui/fixtures/workspace \
+  --automation ./tests/ui/scenarios/smoke.toml \
+  --screenshot-dir ./artifacts/ui \
+  --automation-state-out ./artifacts/ui/state.json \
+  --exit-when-done
+```
+
+When `--automation-state-out` is provided, Zagel writes a full JSON snapshot of
+runtime/app/workspace state at the end of the run (both success and failure), so
+E2E tests can assert behavior without parsing logs.
+
+Supported scenario actions:
+- `select_request` (`value = "relative/path.http#0"`)
+- `send`
+- `wait_for_status` (`value = 200` or `"200"`)
+- `wait_for_text` (`value = "Received response"`)
+- `wait_for_millis` (`value = 1000`)
+- `screenshot` (`value = "after-send"`)
+
+Each action is declared as a `[[step]]` block in TOML.
+
+Bundled scenarios in `tests/ui/scenarios/`:
+- `smoke.toml`: basic selection, send, and screenshot flow
+- `ui_navigation.toml`: selection + ready-state screenshots (no network dependency)
+- `rest_send_status.toml`: send + `wait_for_status` + body text assertion
+- `snapshot_only.toml`: minimal flow for state snapshot generation
+
+Run E2E automation test locally (opt-in):
+
+```bash
+ZAGEL_E2E=1 cargo test --test e2e_automation -- --nocapture
+```
+
 Release build:
 
 ```bash
