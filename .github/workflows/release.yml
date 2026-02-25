@@ -79,8 +79,38 @@ jobs:
           $archive = "dist/${env:BIN_NAME}-${env:GITHUB_REF_NAME}-${{ matrix.target }}.${{ matrix.asset_ext }}"
           Compress-Archive -Path "target\\${{ matrix.target }}\\release\\${env:BIN_NAME}.exe" -DestinationPath $archive -Force
 
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+  checksums:
+    name: Publish release checksums
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        run: python3 scripts/release_checksums.py dist --output dist/SHA256SUMS
+
+      - name: Upload checksums to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SHA256SUMS

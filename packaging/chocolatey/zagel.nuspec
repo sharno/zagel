@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>zagel</id>
+    <version>0.3.0</version>
+    <title>Zagel</title>
+    <authors>sharno</authors>
+    <projectUrl>https://github.com/sharno/zagel</projectUrl>
+    <license type="expression">MIT OR Apache-2.0</license>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Desktop REST workbench with .http/.env collections and persisted state.</description>
+    <tags>zagel rest http client gui</tags>
+  </metadata>
+</package>

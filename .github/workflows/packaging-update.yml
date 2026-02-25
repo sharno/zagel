@@ -1,0 +1,80 @@
+name: Packaging Update
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package (example: v0.3.0)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-manifests:
+    name: Update package manager manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName')"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Failed to resolve release tag" >&2
+            exit 1
+          fi
+
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.tag.outputs.value }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,assets > release.json
+
+      - name: Generate packaging manifests
+        run: |
+          python3 scripts/release_packaging.py \
+            --release-json release.json \
+            --output-dir packaging
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: automation/packaging-${{ steps.tag.outputs.value }}
+          delete-branch: true
+          commit-message: "chore: update package manifests for ${{ steps.tag.outputs.value }}"
+          title: "chore: update package manifests for ${{ steps.tag.outputs.value }}"
+          body: |
+            ## Summary
+            - update Homebrew, Scoop, Winget, Chocolatey, and AUR metadata for `${{ steps.tag.outputs.value }}`
+            - regenerate files from GitHub release assets and digests
+
+            ## Follow-up
+            - submit these manifests to their upstream package-manager repositories
+          add-paths: |
+            packaging/**
