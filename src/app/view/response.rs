@@ -1,9 +1,11 @@
+use ego_tree::NodeRef;
 use iced::widget::text::Wrapping;
-use iced::widget::{button, column, container, pick_list, row, rule, text, text_editor};
+use iced::widget::{
+    button, column, container, pick_list, row, rule, scrollable, text, text_editor,
+};
 use iced::{Element, Length};
 use iced_highlighter::Theme as HighlightTheme;
 use scraper::{Html, Node};
-use ego_tree::NodeRef;
 
 use super::super::Message;
 use crate::model::ResponsePreview;
@@ -196,7 +198,7 @@ pub fn response_view_toggle(current: ResponseDisplay) -> Element<'static, Messag
 }
 
 /// Creates the main response panel UI element.
-/// 
+///
 /// Displays the HTTP response status, duration, and either the body or headers
 /// based on the selected tab. Supports both raw and pretty-printed views for
 /// JSON and HTML content.
@@ -254,10 +256,12 @@ pub fn response_panel<'a>(
             .spacing(6)
             .into();
 
-            let headers_section: Element<'_, Message> =
-                column![text("Headers").size(14), headers_view.spacing(4),]
-                    .spacing(6)
-                    .into();
+            let headers_section: Element<'_, Message> = column![
+                text("Headers").size(14),
+                scrollable(headers_view.spacing(4)).height(Length::Fill),
+            ]
+            .spacing(6)
+            .into();
 
             let tab_view: Element<'_, Message> = match tab {
                 ResponseTab::Body => body_section,
@@ -277,7 +281,7 @@ pub fn response_panel<'a>(
 }
 
 /// Attempts to format a JSON string with proper indentation.
-/// 
+///
 /// Returns `Some(formatted_json)` if the input is valid JSON, otherwise returns `None`.
 pub fn pretty_json(raw: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(raw)
@@ -300,8 +304,8 @@ pub fn pretty_html(raw: &str, mode: HtmlParseMode) -> String {
 
     // List of void/self-closing tags that don't need closing tags
     let void_tags: std::collections::HashSet<&str> = [
-        "area", "base", "br", "col", "embed", "hr", "img", "input",
-        "link", "meta", "param", "source", "track", "wbr",
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+        "source", "track", "wbr",
     ]
     .into_iter()
     .collect();
@@ -309,7 +313,14 @@ pub fn pretty_html(raw: &str, mode: HtmlParseMode) -> String {
     let mut result = String::new();
     match mode {
         HtmlParseMode::Document => {
-            format_node(document.tree.root(), &mut result, 0, &void_tags, false, false);
+            format_node(
+                document.tree.root(),
+                &mut result,
+                0,
+                &void_tags,
+                false,
+                false,
+            );
         }
         HtmlParseMode::Fragment => {
             let raw_has_body_tag = trimmed.to_ascii_lowercase().contains("<body");
@@ -367,7 +378,7 @@ fn format_fragment_root(
 }
 
 /// Recursively formats an HTML node tree with proper indentation.
-/// 
+///
 /// Preserves text content verbatim, especially within preformatted tags (pre, code, etc.).
 /// Only adds newlines and indentation when `should_indent` is true to avoid
 /// forcing formatting on inline-only content.
@@ -388,7 +399,14 @@ fn format_node(
     match node.value() {
         Node::Document | Node::Fragment => {
             for child in node.children() {
-                format_node(child, output, indent, void_tags, in_preformatted, should_indent);
+                format_node(
+                    child,
+                    output,
+                    indent,
+                    void_tags,
+                    in_preformatted,
+                    should_indent,
+                );
             }
         }
         Node::Doctype(doctype) => {
@@ -467,19 +485,38 @@ fn format_node(
             }
 
             let children: Vec<_> = node.children().collect();
-            let has_text_children = children.iter().any(|child| matches!(child.value(), Node::Text(_)));
-            let has_element_children = children.iter().any(|child| matches!(child.value(), Node::Element(_)));
-            let child_should_indent = has_element_children || (has_text_children && children.len() > 1);
+            let has_text_children = children
+                .iter()
+                .any(|child| matches!(child.value(), Node::Text(_)));
+            let has_element_children = children
+                .iter()
+                .any(|child| matches!(child.value(), Node::Element(_)));
+            let child_should_indent =
+                has_element_children || (has_text_children && children.len() > 1);
 
             // Determine if children are in preformatted context
             let child_in_preformatted = in_preformatted || tag_is_preformatted;
 
             for child in children {
                 if child_should_indent {
-                    format_node(child, output, indent + 1, void_tags, child_in_preformatted, child_should_indent);
+                    format_node(
+                        child,
+                        output,
+                        indent + 1,
+                        void_tags,
+                        child_in_preformatted,
+                        child_should_indent,
+                    );
                 } else {
                     // For inline formatting, pass 0 indent but preserve preformatted context
-                    format_node(child, output, 0, void_tags, child_in_preformatted, child_should_indent);
+                    format_node(
+                        child,
+                        output,
+                        0,
+                        void_tags,
+                        child_in_preformatted,
+                        child_should_indent,
+                    );
                 }
             }
 

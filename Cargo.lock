@@ -6046,6 +6046,7 @@ dependencies = [
  "futures",
  "iced",
  "iced_highlighter",
+ "image",
  "notify",
  "reqwest",
  "scraper",

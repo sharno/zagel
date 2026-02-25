@@ -1,13 +1,11 @@
-use iced::{Subscription, keyboard};
+use iced::{keyboard, Subscription};
 
 use super::messages::Message;
 
 pub fn subscription() -> Subscription<Message> {
     keyboard::listen().filter_map(|event| match event {
         keyboard::Event::KeyPressed { key, modifiers, .. } => match key {
-            keyboard::Key::Character(c)
-                if c == "?" || (c == "/" && modifiers.shift()) =>
-            {
+            keyboard::Key::Character(c) if c == "?" || (c == "/" && modifiers.shift()) => {
                 Some(Message::ToggleShortcutsHelp)
             }
             keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") && modifiers.command() => {

@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
 use crate::theme::ThemeChoice;
+
+static STATE_FILE_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppState {
@@ -55,6 +58,13 @@ impl AppState {
     }
 }
 
+pub fn set_state_file_override(path: PathBuf) -> Result<(), PathBuf> {
+    STATE_FILE_OVERRIDE.set(path)
+}
+
 fn state_file_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("zagel").join("state.toml"))
+    STATE_FILE_OVERRIDE
+        .get()
+        .cloned()
+        .or_else(|| dirs::config_dir().map(|dir| dir.join("zagel").join("state.toml")))
 }

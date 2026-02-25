@@ -196,6 +196,13 @@ impl Zagel {
                 self.update_status_with_missing(&message);
                 Task::none()
             }
+            Message::AutomationStart | Message::AutomationPoll => self.handle_automation_pulse(),
+            Message::AutomationWindowResolved(window_id) => {
+                self.handle_automation_window_resolved(window_id)
+            }
+            Message::AutomationScreenshotCaptured(screenshot) => {
+                self.handle_automation_screenshot(screenshot)
+            }
             Message::HttpFilesLoaded(files) => {
                 if !self.should_scan() {
                     return Task::none();
@@ -657,7 +664,7 @@ impl Zagel {
                 let extra_refs: Vec<&str> = extra_inputs.iter().map(String::as_str).collect();
                 self.status_line =
                     status_with_missing("Sending...", &draft, env.as_ref(), &extra_refs);
-                Task::perform(
+                let send = Task::perform(
                     send_request(
                         self.client.clone(),
                         draft,
@@ -666,7 +673,8 @@ impl Zagel {
                         self.oauth2_token_cache.clone(),
                     ),
                     Message::ResponseReady,
-                )
+                );
+                Task::batch([send, self.automation_pulse_task()])
             }
             Message::ResponseReady(result) => {
                 match result {

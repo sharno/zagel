@@ -1,0 +1,18 @@
+name = "ui-navigation"
+
+[[step]]
+action = "select_request"
+value = "requests/sample.http#0"
+timeout_ms = 10000
+
+[[step]]
+action = "screenshot"
+value = "selected"
+
+[[step]]
+action = "wait_for_millis"
+value = 200
+
+[[step]]
+action = "screenshot"
+value = "ready"

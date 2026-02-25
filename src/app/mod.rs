@@ -1,3 +1,4 @@
+mod automation;
 mod domain;
 mod headers;
 mod hotkeys;
